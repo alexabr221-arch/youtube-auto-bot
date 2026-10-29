@@ -1,0 +1,30 @@
+name: Post Video
+on:
+  schedule:
+    - cron: '0 11,16,19 * * *'
+  workflow_dispatch:
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Post Shorts
+        if: github.event.schedule == '0 11 * * *' || github.event.schedule == '0 19 * * *' || github.event_name == 'workflow_dispatch'
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          IS_SHORT: 'true'
+        run: python main.py
+      - name: Post Long
+        if: github.event.schedule == '0 16 * * *'
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          IS_SHORT: 'false'
+        run: python main.py
