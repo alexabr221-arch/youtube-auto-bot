@@ -99,10 +99,10 @@ def create_text_image(text, W, H, highlight=False):
     # Progress bar background
     draw.rectangle([0, H-12, W, H], fill=(50,50,50))
     
-    lines = textwrap.wrap(text, width=28)
+    lines = textwrap.wrap(text, width=20)
     y = H//2 - len(lines)*45
     try:
-        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 58)
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 42)
     except:
         font = ImageFont.load_default()
     
