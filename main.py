@@ -44,7 +44,6 @@ def download_ai_background(story, W, H):
     safe = urllib.parse.quote(prompt + ", ultra realistic, 8k, cinematic, portrait centered, not stretched")
     url = f"https://image.pollinations.ai/prompt/{safe}?width={W}&height={H}&model=flux&nologo=true&seed={random.randint(1,99999)}"
     try:
-        print(f"Generating: {prompt}")
         r = requests.get(url, timeout=90)
         if r.status_code == 200 and len(r.content) > 5000:
             open("bg.jpg","wb").write(r.content)
@@ -92,36 +91,34 @@ async def make_voice_with_timing(text, file="voice.mp3"):
             if chunk["type"] == "audio":
                 f.write(chunk["data"])
             elif chunk["type"] == "WordBoundary":
-                # Fix: edge-tts gives offset in 100-nanosecond units
-                start = chunk["offset"] / 10000000
-                dur = chunk["duration"] / 10000000
-                words.append((start, start+dur, chunk["text"]))
+                s = chunk["offset"] / 10000000
+                e = s + (chunk["duration"] / 10000000)
+                words.append((s, e, chunk["text"]))
+    print(f"Got {len(words)} word timestamps")
     return file, words
 
 def make_caption_clip(text, W, H, duration, start):
     img = Image.new('RGBA', (W, 700), (0,0,0,0))
     draw = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 95)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 100)
     except:
-        try: font = ImageFont.truetype("DejaVuSans-Bold.ttf", 95)
+        try: font = ImageFont.truetype("DejaVuSans-Bold.ttf", 100)
         except: font = ImageFont.load_default()
     
-    lines = textwrap.wrap(text.upper(), width=14)
-    y = 20
-    for line in lines[:3]:
-        bbox = draw.textbbox((0,0), line, font=font)
-        tw = bbox[2]-bbox[0]
-        th = bbox[3]-bbox[1]
-        x = (W - tw)//2
-        for dx in [-5,-3,0,3,5]:
-            for dy in [-5,-3,0,3,5]:
-                if abs(dx)+abs(dy) > 0:
-                    draw.text((x+dx, y+dy), line, font=font, fill=(0,0,0,255))
-        draw.text((x, y), line, font=font, fill=(255,255,255,255))
-        y += th + 15
+    line = text.upper().strip()
+    bbox = draw.textbbox((0,0), line, font=font)
+    tw = bbox[2]-bbox[0]
+    th = bbox[3]-bbox[1]
+    x = (W - tw)//2
+    y = 350 - th//2
+    for dx in range(-6,7):
+        for dy in range(-6,7):
+            if dx!=0 or dy!=0:
+                draw.text((x+dx, y+dy), line, font=font, fill=(0,0,0,255))
+    draw.text((x, y), line, font=font, fill=(255,255,255,255))
     
-    path = f"cap_{int(start*1000)}_{random.randint(0,99999)}.png"
+    path = f"cap_{int(start*1000)}_{random.randint(0,999999)}.png"
     img.save(path)
     return ImageClip(path, duration=duration).set_start(start).set_position(("center", H//2))
 
@@ -151,57 +148,32 @@ def make_video():
     W,H = (1080,1920) if IS_SHORT else (1920,1080)
     audio_file, word_data = asyncio.run(make_voice_with_timing(story_raw))
     audio = AudioFileClip(audio_file)
-    duration = min(audio.duration, 44 if IS_SHORT else 480)
+    duration = audio.duration
     
     bg_path = download_ai_background(story_raw, W, H)
-    # FIX IMAGE STRETCH - crop to fit, not stretch
     raw_bg = ImageClip(bg_path)
-    # Scale to COVER screen then crop center
     if raw_bg.w / raw_bg.h < W / H:
-        # too tall narrow -> match width
         raw_bg = raw_bg.resize(width=W)
     else:
-        # too wide -> match height
         raw_bg = raw_bg.resize(height=H)
-    # now crop center to exact W,H
     x1 = (raw_bg.w - W)/2
     y1 = (raw_bg.h - H)/2
     bg_clip = raw_bg.crop(x1=x1, y1=y1, width=W, height=H).set_duration(duration).fx(vfx.colorx, 0.6)
 
     caps = []
     if word_data and len(word_data) > 5:
-        print(f"SYNC MODE: {len(word_data)} words - FAST captions")
-        # FAST SYNC: 2 words per caption to match voice speed
-        phrases=[]; temp=[]; temp_start=0; temp_end=0
-        for i,(s,e,w) in enumerate(word_data):
-            if not temp: temp_start=s
-            temp.append(w)
-            temp_end = e
-            if len(temp)>=2 or i==len(word_data)-1:  # 2 words = faster
-                dur = temp_end - temp_start
-                if dur < 0.3: dur = 0.3
-                if dur > 1.2: dur = 1.0
-                phrases.append((temp_start, dur, " ".join(temp)))
-                temp=[]
-        for start,dur,txt in phrases:
-            if start < duration:
-                caps.append(make_caption_clip(txt,W,H,min(dur, duration-start),start))
+        for s, e, w in word_data:
+            dur = (e - s) + 0.12
+            if s < duration:
+                caps.append(make_caption_clip(w, W, H, dur, s))
     else:
-        print(f"FALLBACK SYNC: estimating from audio {duration}s")
         words = story_raw.split()
-        # Estimate 2.5 words per second speaking rate
-        words_per_sec = len(words) / max(1, duration-3)
-        chunk_size = 2
-        for i in range(0, len(words), chunk_size):
-            chunk_text = " ".join(words[i:i+chunk_size])
-            start = (i / len(words)) * duration
-            dur = chunk_size / max(1, words_per_sec)
-            if dur < 0.35: dur = 0.35
-            caps.append(make_caption_clip(chunk_text, W, H, dur, start))
+        for i, w in enumerate(words):
+            s = (i / len(words)) * duration
+            caps.append(make_caption_clip(w, W, H, 0.4, s))
 
-    print(f"Created {len(caps)} caption clips")
     end_card = make_end_card(W, H, duration)
-    final = CompositeVideoClip([bg_clip]+caps+[end_card], size=(W,H)).set_audio(audio.set_duration(duration))
+    final = CompositeVideoClip([bg_clip]+caps+[end_card], size=(W,H)).set_audio(audio)
     final.write_videofile("final.mp4", fps=24, codec="libx264", audio_codec="aac")
     return "final.mp4"
 
@@ -224,6 +196,5 @@ try:
         part="snippet",
         body={"snippet": {"videoId": vid_id, "topLevelComment": {"snippet": {"textOriginal": comment_text}}}}
     ).execute()
-    print("Pinned comment added!")
 except Exception as e:
     print(f"Comment failed: {e}")
