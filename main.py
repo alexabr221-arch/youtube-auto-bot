@@ -1,132 +1,131 @@
-import os, random, textwrap, asyncio, re
-from moviepy.editor import *
+import asyncio
+import random
+import textwrap
+import re
+import os
+import json
+import urllib.parse
+import requests
 from PIL import Image, ImageDraw, ImageFont
+from moviepy.editor import AudioFileClip, ImageClip, CompositeVideoClip
 import edge_tts
-from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
-from googleapiclient.http import MediaFileUpload
 
-IS_SHORT = os.getenv("IS_SHORT") == "true"
+# === CONFIG ===
+IS_SHORT = True
+VOICE = "en-US-ChristopherNeural"  # Deep male viral voice
 
-# === STORIES BANK ===
+# === STORIES ===
 STORIES = [
-    "My boyfriend told me he goes to the gym every morning at 5am. I decided to follow him one day and what I saw broke me completely. He was not at the gym.",
-    "My wife said she was working late for 3 weeks straight. I brought her dinner to her office and her boss said she left 3 weeks ago. She was fired.",
-    "My mother in law told my husband I am cheating on him. I found out she hired someone to send me fake messages to frame me.",
-    "I found my girlfriend's second phone hidden in her closet. The messages inside made me freeze. She has a whole second life.",
-    "My husband and I have been married for 5 years and yesterday I found out his first wife never divorced him. I am not his wife."
+    "My wife said she was going to the gym at 5am. I decided to follow her one morning. She didn't go to the gym. She went to an apartment building across town. I watched her go inside.",
+    "I found my husband's old phone in the garage. The messages inside made me realize our entire marriage was a lie. I confronted him that night.",
+    "My girlfriend said she was working late. I drove to her office and her car wasn't there. I called her boss and he said she left at 3pm. Then I saw her at a restaurant with someone else.",
+    "My husband has been acting strange for months. He hides his phone and stays up late. Last night I checked his laptop while he was sleeping and found everything.",
+    "I thought my wife was cheating so I put a voice recorder in her car. What I heard the next day changed everything I thought I knew."
 ]
+
 story_raw = random.choice(STORIES)
+print(f"Story: {story_raw}")
 
-# === VIRAL BRAIN ===
-def viral_pack(story, is_short):
-    short_titles = ["I Followed Him And Regretted It Immediately", "She Lied For 3 Weeks Straight", "I Found Her Second Phone", "My Wife's Boss Told Me The Truth"]
-    long_titles = ["My Partner Cheated For Months, Here Is How I Found Out", "The Day I Discovered The Truth Changed Everything"]
-    thumb_texts = ["I CAUGHT THEM!", "SHE LIED!", "I FOLLOWED HIM!", "HE CHEATED!"]
-    title = random.choice(short_titles if is_short else long_titles)
-    if is_short: title += " #shorts"
-    thumb = random.choice(thumb_texts)
-    if is_short:
-        desc = f"""{story}
+# === VOICE ===
+async def make_voice(text):
+    communicate = edge_tts.Communicate(text, VOICE)
+    await communicate.save("voice.mp3")
+    print("Voice saved")
 
-Full story on my channel, you won't believe what happened next.
+# === 3x CINEMATIC BACKGROUNDS ===
+def get_story_prompts(story):
+    s = story.lower()
+    if "phone" in s or "message" in s:
+        return [
+            "woman alone in dark bedroom holding phone, calm, cinematic 4k",
+            "woman looking shocked at phone screen in bed, tension, moody",
+            "phone screen glowing in dark, secrets revealed, cinematic"
+        ]
+    if "gym" in s:
+        return [
+            "empty gym early morning 5am, cinematic moody",
+            "man walking into gym suspicious, dark street, cinematic",
+            "gym locker room secret, tension, 4k moody"
+        ]
+    if "office" in s or "work" in s or "boss" in s:
+        return [
+            "empty office desk at night, lonely, cinematic 4k",
+            "woman walking out of office building late, dark street",
+            "boss office door closed, secret, moody cinematic"
+        ]
+    return [
+        "sad couple sitting apart in living room, distance, cinematic 4k",
+        "person crying alone in bedroom at night, moody atmosphere",
+        "shocking argument in house, emotional climax, dark cinematic"
+    ]
 
-#shorts #redditstories #cheatingstories #relationship
+def download_backgrounds(story, W, H):
+    prompts = get_story_prompts(story)
+    paths = []
+    for i, prompt in enumerate(prompts):
+        path = f"bg_{i}.jpg"
+        try:
+            url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width={W}&height={H}&nologo=true&seed={random.randint(1,99999)}"
+            print(f"Downloading BG {i+1}: {prompt}")
+            r = requests.get(url, timeout=40)
+            if r.status_code == 200:
+                with open(path, 'wb') as f:
+                    f.write(r.content)
+                paths.append(path)
+            else:
+                raise Exception("bad status")
+        except Exception as e:
+            print(f"BG {i} failed: {e}")
+            img = Image.new('RGB', (W, H), color=(25 + i*10, 20, 35))
+            img.save(path)
+            paths.append(path)
+    return paths
 
-Subscribe for daily stories 12pm, 5pm, 8pm WAT!"""
-    else:
-        desc = f"""{story}
-
-What would you have done? Comment below.
-
-TIMESTAMPS:
-00:00 - How it started
-01:30 - I started suspecting
-03:45 - The day I found out
-06:00 - What I did next
-
-Subscribe for daily shocking true stories!
-
-#redditstories #relationships #cheating #storytime
-
-Disclaimer: Names changed for privacy."""
-    tags = ["reddit stories","cheating stories","relationship stories"]
-    return title, desc, tags, thumb
-
-title, desc, tags, thumb_text = viral_pack(story_raw, IS_SHORT)
-
-# === PRO THUMBNAIL ===
-def make_thumbnail(text, is_short):
-    W, H = (1080, 1920) if is_short else (1280, 720)
-    img = Image.new('RGB', (W, H), color=(255, 255, 255))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([W*0.65, 0, W, H], fill=(0,0,0))
+def create_text_image(text, W, H, bg_path, highlight=False):
     try:
-        font_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 110 if is_short else 80)
-        font_mid = ImageFont.truetype("DejaVuSans.ttf", 50)
+        bg = Image.open(bg_path).convert('RGB')
+        bg = bg.resize((W, H))
     except:
-        font_big = ImageFont.load_default()
-        font_mid = font_big
-    lines = textwrap.wrap(text.upper(), width=12 if is_short else 18)
-    y = 120
-    for line in lines:
-        x = 40
-        draw.text((x+8, y+8), line, font=font_big, fill=(0,0,0))
-        for dx in [-3,3]:
-            for dy in [-3,3]:
-                draw.text((x+dx, y+dy), line, font=font_big, fill=(255,255,0))
-        draw.text((x, y), line, font=font_big, fill=(0,0,0))
-        y += 200 if is_short else 150
-    draw.rounded_rectangle([40, H-180, 500, H-90], radius=20, fill=(255,0,0))
-    draw.text((70, H-170), "REDDIT STORY", font=font_mid, fill=(255,255,255))
-    draw.ellipse([W*0.68, 80, W*0.95, 380], fill=(255,230,0))
-    try:
-        draw.text((W*0.72, 130), "😱", font=ImageFont.truetype("DejaVuSans.ttf", 150), fill=(0,0,0))
-    except:
-        draw.text((W*0.72, 130), "!!", font=font_big, fill=(0,0,0))
-    img.save("thumb.jpg", quality=95)
-    return "thumb.jpg"
-
-# === VIRAL VIDEO WITH WORD HIGHLIGHT ===
-async def make_voice(text, file="voice.mp3"):
-    communicate = edge_tts.Communicate(text, "en-US-ChristopherNeural") # DEEP MALE VIRAL VOICE
-    await communicate.save(file)
-    return file
-
-def create_text_image(text, W, H, highlight=False):
-    img = Image.new('RGB', (W, H), color=(15,15,15))
-    draw = ImageDraw.Draw(img)
-    # Progress bar background
-    draw.rectangle([0, H-12, W, H], fill=(50,50,50))
+        bg = Image.new('RGB', (W, H), color=(20, 20, 30))
     
-    lines = textwrap.wrap(text, width=20)
-    y = H//2 - len(lines)*45
+    overlay = Image.new('RGB', (W, H), color=(0, 0, 0))
+    bg = Image.blend(bg, overlay, 0.55)
+    
+    draw = ImageDraw.Draw(bg)
+    draw.rectangle([0, H-10, W, H], fill=(80, 80, 80))
+    
     try:
-        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 42)
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 44)
     except:
         font = ImageFont.load_default()
     
+    lines = textwrap.wrap(text, width=22)
+    total_h = len(lines) * 68
+    y = (H // 2) - (total_h // 2)
+    
     for line in lines:
-        bbox = draw.textbbox((0,0), line, font=font)
-        w = bbox[2]-bbox[0]
-        x = (W-w)//2
-        # Glow + highlight
-        if highlight:
-            draw.text((x+4, y+4), line, font=font, fill=(0,0,0))
-            draw.text((x, y), line, font=font, fill=(255,235,59)) # YELLOW VIRAL
-        else:
-            draw.text((x+3, y+3), line, font=font, fill=(0,0,0))
-            draw.text((x, y), line, font=font, fill=(255,255,255))
-        y += 85
-    return img
+        bbox = draw.textbbox((0, 0), line, font=font)
+        w = bbox[2] - bbox[0]
+        x = (W - w) // 2
+        
+        for dx in [-2, -1, 0, 1, 2]:
+            for dy in [-2, -1, 0, 1, 2]:
+                if abs(dx) + abs(dy) != 0:
+                    draw.text((x+dx, y+dy), line, font=font, fill=(0, 0, 0))
+        color = (255, 235, 59) if highlight else (255, 255, 255)
+        draw.text((x, y), line, font=font, fill=color)
+        y += 68
+    
+    return bg
 
 def make_video():
     asyncio.run(make_voice(story_raw))
-    W,H = (1080, 1920) if IS_SHORT else (1280, 720)
+    W, H = (1080, 1920) if IS_SHORT else (1280, 720)
     audio = AudioFileClip("voice.mp3")
     duration = min(audio.duration, 34 if IS_SHORT else 590)
     
-    # Split story into sentences for word highlight effect
+    bg_paths = download_backgrounds(story_raw, W, H)
+    
     sentences = re.split(r'(?<=[.!?]) +', story_raw)
     sentences = [s.strip() for s in sentences if s.strip()]
     
@@ -134,46 +133,67 @@ def make_video():
     total_chars = sum(len(s) for s in sentences)
     current_time = 0
     
-    for sent in sentences:
-        sent_duration = (len(sent)/total_chars) * duration
-        if sent_duration < 0.8: sent_duration = 0.8
+    for idx, sent in enumerate(sentences):
+        sent_duration = (len(sent) / total_chars) * duration
+        if sent_duration < 0.9:
+            sent_duration = 0.9
         
-        # Create image with this sentence highlighted
-        pil_img = create_text_image(sent, W, H, highlight=True)
-        path = f"frame_{current_time}.jpg"
+        bg_index = min((idx // 2), len(bg_paths)-1)
+        bg_path = bg_paths[bg_index]
+        
+        pil_img = create_text_image(sent, W, H, bg_path, highlight=True)
+        path = f"frame_{idx}.jpg"
         pil_img.save(path)
         
         img_clip = ImageClip(path).set_duration(sent_duration).set_start(current_time)
+        if idx > 0:
+            img_clip = img_clip.crossfadein(0.3)
+        
         clips.append(img_clip)
         current_time += sent_duration
-        if current_time >= duration: break
+        if current_time >= duration:
+            break
     
-    # Background + audio
-    final_video = CompositeVideoClip(clips, size=(W,H)).set_duration(duration)
+    final_video = CompositeVideoClip(clips, size=(W, H)).set_duration(duration)
     final_video = final_video.set_audio(audio.set_duration(duration))
-    
-    # Add moving progress bar
-    def make_progress_bar(t):
-        img = Image.new('RGBA', (W, 12), (0,0,0,0))
-        d = ImageDraw.Draw(img)
-        progress = int((t/duration)*W)
-        d.rectangle([0,0,progress,12], fill=(255,0,0))
-        return np.array(img)
-    
-    # Write final
     final_video.write_videofile("final.mp4", fps=24, codec='libx264', audio_codec='aac')
     return "final.mp4"
 
-import numpy as np
-video_file = make_video()
-thumb_file = make_thumbnail(thumb_text, IS_SHORT)
+# === UPLOAD TO YOUTUBE ===
+def upload_youtube(video_path):
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    
+    creds_info = json.loads(os.environ['YT_CREDENTIALS'])
+    creds = Credentials.from_authorized_user_info(creds_info)
+    youtube = build('youtube', 'v3', credentials=creds)
+    
+    title = "He Didn't Go To The Gym... #reddit #story"
+    if len(story_raw) > 20:
+        title = story_raw[:60] + "..."
+    
+    request = youtube.videos().insert(
+        part="snippet,status",
+        body={
+            "snippet": {
+                "title": title[:95],
+                "description": story_raw + "\n\n#redditstories #cheating #storytime",
+                "tags": ["reddit", "story", "cheating"]
+            },
+            "status": {
+                "privacyStatus": "public",
+                "selfDeclaredMadeForKids": False
+            }
+        },
+        media_body=MediaFileUpload(video_path, chunksize=-1, resumable=True)
+    )
+    response = request.execute()
+    print(f"Uploaded: {response['id']}")
+    return response
 
-# === UPLOAD ===
-creds = Credentials(None, refresh_token=os.getenv("YT_REFRESH_TOKEN"), token_uri="https://oauth2.googleapis.com/token", client_id=os.getenv("YT_CLIENT_ID"), client_secret=os.getenv("YT_CLIENT_SECRET"))
-youtube = build("youtube", "v3", credentials=creds)
-body = {"snippet": {"title": title[:100], "description": desc, "tags": tags, "categoryId": "22"}, "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False}}
-video = youtube.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(video_file, chunksize=-1, resumable=True)).execute()
-print(f"UPLOADED: {video['id']} | {title}")
-if not IS_SHORT:
-    youtube.thumbnails().set(videoId=video["id"], media_body=MediaFileUpload(thumb_file)).execute()
-    print(f"THUMBNAIL: {thumb_text}")
+if __name__ == "__main__":
+    video_file = make_video()
+    print(f"Video made: {video_file}")
+    upload_youtube(video_file)
+    print("DONE")
