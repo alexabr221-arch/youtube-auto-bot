@@ -1,4 +1,8 @@
 import os, random, textwrap, asyncio, requests
+from PIL import Image
+# FIX for new Pillow - MoviePy still uses ANTIALIAS
+if not hasattr(Image, 'ANTIALIAS'):
+    Image.ANTIALIAS = Image.LANCZOS
 from datetime import datetime, timezone
 from moviepy.editor import *
 from PIL import Image, ImageDraw, ImageFont
