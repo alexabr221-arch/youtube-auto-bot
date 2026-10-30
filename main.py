@@ -26,7 +26,6 @@ STORIES = [
 
 story_raw = random.choice(STORIES)
 
-# === AI IMAGE PROMPTS - MATCHES STORY ===
 def get_ai_prompt_from_story(story):
     s = story.lower()
     if "best friend" in s and "boyfriend" in s:
@@ -34,7 +33,7 @@ def get_ai_prompt_from_story(story):
     if "best friend" in s and "girlfriend" in s:
         return "sad young man sitting alone on bench at night in heavy rain heartbroken betrayal, hoodie, cinematic moody, ultra realistic"
     if "hotel" in s and "wife" in s:
-        return "shocked man standing outside hotel room 204 door at night betrayal, cinematic noir lighting"
+        return "silhouette of man walking down dark hotel hallway at night, hotel room doors, cinematic noir, moody dramatic lighting, ultra realistic"
     if "second phone" in s or "phone" in s:
         return "man holding two phones shocked discovery cheating in dark bedroom, cinematic dramatic"
     if "mother in law" in s:
@@ -53,7 +52,6 @@ def download_ai_background(story, W, H):
             return "bg.jpg"
     except Exception as e:
         print(f"AI fail: {e}")
-    # fallback
     r = requests.get(f"https://picsum.photos/{W}/{H}?random={random.randint(1,1000)}", timeout=20)
     open("bg.jpg","wb").write(r.content)
     return "bg.jpg"
@@ -83,14 +81,11 @@ def make_thumbnail(text, is_short):
     img.save("thumb.jpg", quality=95)
     return "thumb.jpg"
 
-# === VOICE + WORD TIMESTAMPS ===
 async def make_voice_with_timing(text, file="voice.mp3"):
-    # Add CTA to voice
     if IS_SHORT:
         text = text + " ... Want the full shocking ending? Full story drops tonight at 8pm West Africa Time. Subscribe so you don't miss it!"
     else:
         text = text + " ... What would you do in my place? Comment below, I read every comment. And subscribe for daily shocking true stories."
-    
     communicate = edge_tts.Communicate(text, "en-US-AriaNeural", rate="+8%")
     words = []
     with open(file, "wb") as f:
@@ -102,24 +97,34 @@ async def make_voice_with_timing(text, file="voice.mp3"):
     return file, words
 
 def make_caption_clip(text, W, H, duration, start):
-    img = Image.new('RGBA', (W, 500), (0,0,0,0))
+    # PURE WHITE CAPTIONS
+    img = Image.new('RGBA', (W, 700), (0,0,0,0))
     draw = ImageDraw.Draw(img)
-    try: font = ImageFont.truetype("DejaVuSans-Bold.ttf", 72 if W==1080 else 60)
-    except: font = ImageFont.load_default()
-    lines = textwrap.wrap(text.upper(), width=20 if W==1080 else 38)
-    y=20
-    for line in lines[:2]:
-        try: tw = draw.textbbox((0,0), line, font=font)[2]-draw.textbbox((0,0), line, font=font)[0]
-        except: tw = len(line)*22
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 90)
+    except:
+        try: font = ImageFont.truetype("DejaVuSans-Bold.ttf", 90)
+        except: font = ImageFont.load_default()
+    
+    lines = textwrap.wrap(text.upper(), width=16)
+    y = 20
+    for line in lines[:3]:
+        bbox = draw.textbbox((0,0), line, font=font)
+        tw = bbox[2]-bbox[0]
+        th = bbox[3]-bbox[1]
         x = (W - tw)//2
-        for dx in [-5,5]:
-            for dy in [-5,5]:
-                draw.text((x+dx, y+dy), line, font=font, fill=(0,0,0))
-        draw.text((x, y), line, font=font, fill=(255,255,255))
-        y+=85
-    path = f"cap_{int(start*1000)}.png"
+        # BLACK STROKE for visibility
+        for dx in [-6,-4,-2,0,2,4,6]:
+            for dy in [-6,-4,-2,0,2,4,6]:
+                if abs(dx)+abs(dy) > 1:
+                    draw.text((x+dx, y+dy), line, font=font, fill=(0,0,0,255))
+        # PURE WHITE TEXT
+        draw.text((x, y), line, font=font, fill=(255,255,255,255))
+        y += th + 20
+    
+    path = f"cap_{int(start*1000)}_{random.randint(0,99999)}.png"
     img.save(path)
-    return ImageClip(path, duration=duration).set_start(start).set_position(("center", H//2 + 100))
+    return ImageClip(path, duration=duration).set_start(start).set_position(("center", H//2))
 
 def make_end_card(W, H, duration):
     img = Image.new('RGBA', (W, 350), (0,0,0,0))
@@ -152,19 +157,31 @@ def make_video():
     bg_path = download_ai_background(story_raw, W, H)
     bg_clip = ImageClip(bg_path, duration=duration).resize((W,H)).fx(vfx.colorx, 0.6)
 
-    phrases=[]; temp=[]; temp_start=0
-    for i,(s,e,w) in enumerate(word_data):
-        if not temp: temp_start=s
-        temp.append(w)
-        if len(temp)>=3 or i==len(word_data)-1:
-            phrases.append((temp_start, min(e,duration)-temp_start, " ".join(temp)))
-            temp=[]
-    
-    caps=[]
-    for start,dur,txt in phrases:
-        if dur<0.25: dur=0.35
-        if start<duration: caps.append(make_caption_clip(txt,W,H,dur,start))
+    caps = []
+    if word_data and len(word_data) > 3:
+        print(f"Using word timestamps: {len(word_data)} words")
+        phrases=[]; temp=[]; temp_start=0
+        for i,(s,e,w) in enumerate(word_data):
+            if not temp: temp_start=s
+            temp.append(w)
+            if len(temp)>=3 or i==len(word_data)-1:
+                phrases.append((temp_start, min(e,duration)-temp_start, " ".join(temp)))
+                temp=[]
+        for start,dur,txt in phrases:
+            if dur<0.3: dur=0.4
+            if start<duration: caps.append(make_caption_clip(txt,W,H,dur,start))
+    else:
+        print("Word timestamps empty - using fallback captions!")
+        words = story_raw.split()
+        chunk_size = 3
+        num_chunks = len(words)//chunk_size + 1
+        chunk_duration = duration / max(1, num_chunks)
+        for i in range(0, len(words), chunk_size):
+            chunk_text = " ".join(words[i:i+chunk_size])
+            start = (i//chunk_size) * chunk_duration
+            caps.append(make_caption_clip(chunk_text, W, H, chunk_duration, start))
 
+    print(f"Created {len(caps)} caption clips")
     end_card = make_end_card(W, H, duration)
     final = CompositeVideoClip([bg_clip]+caps+[end_card], size=(W,H)).set_audio(audio.set_duration(duration))
     final.write_videofile("final.mp4", fps=24, codec="libx264", audio_codec="aac")
@@ -181,12 +198,10 @@ video = youtube.videos().insert(part="snippet,status", body=body, media_body=Med
 vid_id = video["id"]
 print(f"UPLOADED: {vid_id} | {title}")
 
-# === PINNED COMMENT FOR SUBS ===
 try:
     comment_text = "🔔 Full story drops at 8PM WAT tonight - it's INSANE. Subscribe so YouTube notifies you! What would YOU do if you were me? Comment below, I read all."
     if not IS_SHORT:
         comment_text = "What would YOU do in this situation? Comment below - I read every comment! Subscribe for daily shocking true stories 🔔"
-    
     youtube.commentThreads().insert(
         part="snippet",
         body={"snippet": {"videoId": vid_id, "topLevelComment": {"snippet": {"textOriginal": comment_text}}}}
