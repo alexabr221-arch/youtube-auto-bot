@@ -149,7 +149,7 @@ def make_video():
         if current_time >= duration: break
     
     # Background + audio
-    final_video = CompositeVideoClips(clips, size=(W,H)).set_duration(duration)
+    final_video = CompositeVideoClip(clips, size=(W,H)).set_duration(duration)
     final_video = final_video.set_audio(audio.set_duration(duration))
     
     # Add moving progress bar
