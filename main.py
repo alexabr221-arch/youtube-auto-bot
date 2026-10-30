@@ -15,7 +15,6 @@ env_val = os.getenv("IS_SHORT")
 IS_SHORT = (env_val == "true") if env_val else (False if utc_hour == 0 else True)
 print(f"UTC Hour: {utc_hour} - Making {'SHORT' if IS_SHORT else 'LONG'}")
 
-# === STORIES ===
 STORIES = [
     "My boyfriend told me he goes to the gym every night at 9pm. Last night I decided to follow him. He didn't go to the gym. He parked at my best friend's apartment. I waited 20 minutes then knocked. She opened it wearing the dress I lost last month. And my boyfriend was on her bed.",
     "My wife said she was working late for 3 weeks straight. One night her coworker posted a story at a hotel bar and my wife was in background laughing with a man. I drove to that hotel. When she opened the door in room 204, she wasn't alone.",
@@ -33,7 +32,7 @@ def get_ai_prompt_from_story(story):
     if "best friend" in s and "girlfriend" in s:
         return "sad young man sitting alone on bench at night in heavy rain heartbroken betrayal, hoodie, cinematic moody, ultra realistic"
     if "hotel" in s and "wife" in s:
-        return "silhouette of man walking down dark hotel hallway at night, hotel room doors, cinematic noir, moody dramatic lighting, ultra realistic"
+        return "beautiful young woman in white sweater anxiously holding hands near mouth, dark hotel hallway background, cinematic soft lighting, ultra realistic portrait, face centered"
     if "second phone" in s or "phone" in s:
         return "man holding two phones shocked discovery cheating in dark bedroom, cinematic dramatic"
     if "mother in law" in s:
@@ -42,7 +41,7 @@ def get_ai_prompt_from_story(story):
 
 def download_ai_background(story, W, H):
     prompt = get_ai_prompt_from_story(story)
-    safe = urllib.parse.quote(prompt + ", ultra realistic, 8k, cinematic, dramatic lighting")
+    safe = urllib.parse.quote(prompt + ", ultra realistic, 8k, cinematic, portrait centered, not stretched")
     url = f"https://image.pollinations.ai/prompt/{safe}?width={W}&height={H}&model=flux&nologo=true&seed={random.randint(1,99999)}"
     try:
         print(f"Generating: {prompt}")
@@ -93,34 +92,34 @@ async def make_voice_with_timing(text, file="voice.mp3"):
             if chunk["type"] == "audio":
                 f.write(chunk["data"])
             elif chunk["type"] == "WordBoundary":
-                words.append((chunk["offset"]/10000000, chunk["offset"]/10000000 + chunk["duration"]/10000000, chunk["text"]))
+                # Fix: edge-tts gives offset in 100-nanosecond units
+                start = chunk["offset"] / 10000000
+                dur = chunk["duration"] / 10000000
+                words.append((start, start+dur, chunk["text"]))
     return file, words
 
 def make_caption_clip(text, W, H, duration, start):
-    # PURE WHITE CAPTIONS
     img = Image.new('RGBA', (W, 700), (0,0,0,0))
     draw = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 90)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 95)
     except:
-        try: font = ImageFont.truetype("DejaVuSans-Bold.ttf", 90)
+        try: font = ImageFont.truetype("DejaVuSans-Bold.ttf", 95)
         except: font = ImageFont.load_default()
     
-    lines = textwrap.wrap(text.upper(), width=16)
+    lines = textwrap.wrap(text.upper(), width=14)
     y = 20
     for line in lines[:3]:
         bbox = draw.textbbox((0,0), line, font=font)
         tw = bbox[2]-bbox[0]
         th = bbox[3]-bbox[1]
         x = (W - tw)//2
-        # BLACK STROKE for visibility
-        for dx in [-6,-4,-2,0,2,4,6]:
-            for dy in [-6,-4,-2,0,2,4,6]:
-                if abs(dx)+abs(dy) > 1:
+        for dx in [-5,-3,0,3,5]:
+            for dy in [-5,-3,0,3,5]:
+                if abs(dx)+abs(dy) > 0:
                     draw.text((x+dx, y+dy), line, font=font, fill=(0,0,0,255))
-        # PURE WHITE TEXT
         draw.text((x, y), line, font=font, fill=(255,255,255,255))
-        y += th + 20
+        y += th + 15
     
     path = f"cap_{int(start*1000)}_{random.randint(0,99999)}.png"
     img.save(path)
@@ -155,31 +154,50 @@ def make_video():
     duration = min(audio.duration, 44 if IS_SHORT else 480)
     
     bg_path = download_ai_background(story_raw, W, H)
-    bg_clip = ImageClip(bg_path, duration=duration).resize((W,H)).fx(vfx.colorx, 0.6)
+    # FIX IMAGE STRETCH - crop to fit, not stretch
+    raw_bg = ImageClip(bg_path)
+    # Scale to COVER screen then crop center
+    if raw_bg.w / raw_bg.h < W / H:
+        # too tall narrow -> match width
+        raw_bg = raw_bg.resize(width=W)
+    else:
+        # too wide -> match height
+        raw_bg = raw_bg.resize(height=H)
+    # now crop center to exact W,H
+    x1 = (raw_bg.w - W)/2
+    y1 = (raw_bg.h - H)/2
+    bg_clip = raw_bg.crop(x1=x1, y1=y1, width=W, height=H).set_duration(duration).fx(vfx.colorx, 0.6)
 
     caps = []
-    if word_data and len(word_data) > 3:
-        print(f"Using word timestamps: {len(word_data)} words")
-        phrases=[]; temp=[]; temp_start=0
+    if word_data and len(word_data) > 5:
+        print(f"SYNC MODE: {len(word_data)} words - FAST captions")
+        # FAST SYNC: 2 words per caption to match voice speed
+        phrases=[]; temp=[]; temp_start=0; temp_end=0
         for i,(s,e,w) in enumerate(word_data):
             if not temp: temp_start=s
             temp.append(w)
-            if len(temp)>=3 or i==len(word_data)-1:
-                phrases.append((temp_start, min(e,duration)-temp_start, " ".join(temp)))
+            temp_end = e
+            if len(temp)>=2 or i==len(word_data)-1:  # 2 words = faster
+                dur = temp_end - temp_start
+                if dur < 0.3: dur = 0.3
+                if dur > 1.2: dur = 1.0
+                phrases.append((temp_start, dur, " ".join(temp)))
                 temp=[]
         for start,dur,txt in phrases:
-            if dur<0.3: dur=0.4
-            if start<duration: caps.append(make_caption_clip(txt,W,H,dur,start))
+            if start < duration:
+                caps.append(make_caption_clip(txt,W,H,min(dur, duration-start),start))
     else:
-        print("Word timestamps empty - using fallback captions!")
+        print(f"FALLBACK SYNC: estimating from audio {duration}s")
         words = story_raw.split()
-        chunk_size = 3
-        num_chunks = len(words)//chunk_size + 1
-        chunk_duration = duration / max(1, num_chunks)
+        # Estimate 2.5 words per second speaking rate
+        words_per_sec = len(words) / max(1, duration-3)
+        chunk_size = 2
         for i in range(0, len(words), chunk_size):
             chunk_text = " ".join(words[i:i+chunk_size])
-            start = (i//chunk_size) * chunk_duration
-            caps.append(make_caption_clip(chunk_text, W, H, chunk_duration, start))
+            start = (i / len(words)) * duration
+            dur = chunk_size / max(1, words_per_sec)
+            if dur < 0.35: dur = 0.35
+            caps.append(make_caption_clip(chunk_text, W, H, dur, start))
 
     print(f"Created {len(caps)} caption clips")
     end_card = make_end_card(W, H, duration)
