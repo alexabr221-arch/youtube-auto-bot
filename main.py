@@ -9,7 +9,9 @@ import edge_tts
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
 
+# Time logic: 0 UTC = midnight WAT = Long form, others Short
 utc_hour = datetime.now(timezone.utc).hour
 env_val = os.getenv("IS_SHORT")
 IS_SHORT = (env_val == "true") if env_val else (False if utc_hour == 0 else True)
@@ -18,6 +20,7 @@ STORIES = [
     "My boyfriend told me he goes to the gym every night at 9pm. Last night I decided to follow him. He didn't go to the gym. He parked at my best friend's apartment. I waited 20 minutes then knocked. She opened it wearing the dress I lost last month. And my boyfriend was on her bed.",
     "My wife said she was working late for 3 weeks straight. One night her coworker posted a story at a hotel bar and my wife was in background laughing with a man. I drove to that hotel. When she opened the door in room 204, she wasn't alone.",
     "My mother in law told my husband I am cheating on him. She showed him fake messages from a fake Instagram she created with my pictures. She wanted her son to marry her friend's daughter. Now my husband is begging for forgiveness.",
+    "My girlfriend always said her ex was crazy and she blocked him. Yesterday I found a second phone in her drawer and it was full of messages with him. She was telling him she still loves him and I'm just temporary.",
 ]
 
 story_raw = random.choice(STORIES)
@@ -30,6 +33,8 @@ def get_ai_prompt_from_story(story):
         return "sad young man alone bench night heavy rain heartbroken hoodie cinematic moody"
     if "hotel" in s:
         return "beautiful young woman white sweater anxious hands near mouth dark hallway cinematic portrait centered ultra realistic"
+    if "second phone" in s or "ex" in s:
+        return "sad man holding phone night dark room heartbroken cinematic"
     return "lonely heartbroken person rain night cinematic sad dark moody"
 
 def download_ai_background(story, W, H):
@@ -40,17 +45,28 @@ def download_ai_background(story, W, H):
         r = requests.get(url, timeout=90)
         if r.status_code == 200 and len(r.content) > 5000:
             open("bg.jpg","wb").write(r.content)
+            print("AI Background OK")
             return "bg.jpg"
-    except: pass
+    except Exception as e:
+        print(f"AI bg fail: {e}")
     r = requests.get(f"https://picsum.photos/{W}/{H}?random={random.randint(1,1000)}", timeout=20)
     open("bg.jpg","wb").write(r.content)
     return "bg.jpg"
 
 def viral_pack(story, is_short):
-    titles = ["I Followed Him And My Heart Shattered Instantly", "My Best Friend Was Wearing MY Clothes When I Caught Them"]
+    if "best friend" in story.lower() and "boyfriend" in story.lower():
+        titles = ["I Followed Him And My Heart Shattered Instantly", "My Best Friend Was Wearing MY Clothes When I Caught Them"]
+        thumb = "SHE STOLE\nMY BF?!"
+    elif "hotel" in story.lower():
+        titles = ["Her Coworker Posted A Story And I Saw My Wife In Background", "I Drove To That Hotel And Knocked On Room 204"]
+        thumb = "ROOM 204\nSHE LIED"
+    else:
+        titles = ["She Said It Was Her Ex But The Messages Said More", "I Found A Second Phone And My World Collapsed"]
+        thumb = "SECOND\nPHONE"
     title = random.choice(titles) + (" #shorts" if is_short else "")
-    desc = f"{story}\n\n#shorts #redditstories"
-    return title, desc, ["shorts","reddit"], "SHE CHEATED?!"
+    desc = f"{story}\n\nVisuals and voiceover are AI-generated illustrations for storytelling purposes.\n\n#shorts #redditstories #cheating #storytime #drama"
+    tags = ["shorts","reddit stories","cheating story","storytime","drama"]
+    return title, desc, tags, thumb
 
 title, desc, tags, thumb_text = viral_pack(story_raw, IS_SHORT)
 
@@ -58,8 +74,10 @@ def make_thumbnail(text, is_short):
     W, H = (1080, 1920) if is_short else (1280, 720)
     img = Image.new('RGB', (W, H), color=(255, 215, 0))
     draw = ImageDraw.Draw(img)
-    try: font_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 180)
-    except: font_big = ImageFont.load_default()
+    try:
+        font_big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 180)
+    except:
+        font_big = ImageFont.load_default()
     draw.text((40, 120), text, font=font_big, fill=(0,0,0))
     img.save("thumb.jpg", quality=95)
     return "thumb.jpg"
@@ -83,7 +101,6 @@ async def make_voice_with_timing(text, file="voice.mp3"):
     return file, words
 
 def make_caption_image(text, W, path):
-    # PIL CAPTION - THIS ALWAYS SHOWS
     img = Image.new('RGBA', (W, 400), (0,0,0,0))
     draw = ImageDraw.Draw(img)
     try:
@@ -97,7 +114,6 @@ def make_caption_image(text, W, path):
     th = bbox[3]-bbox[1]
     x = (W - tw)//2
     y = (400 - th)//2
-    # thick black outline
     for dx in (-5,-3,0,3,5):
         for dy in (-5,-3,0,3,5):
             if dx or dy:
@@ -124,16 +140,13 @@ def make_video():
     print(f"Creating {len(word_data)} captions with exact timing")
     for i, (s, e, w) in enumerate(word_data):
         if s >= duration: break
-        # PERFECT SYNC: cut at next word start
         if i+1 < len(word_data):
             next_s = word_data[i+1][0]
             if e > next_s:
                 e = next_s
         dur = e - s
-        if dur < 0.18:
-            dur = 0.18
-        if s + dur > duration:
-            dur = duration - s
+        if dur < 0.18: dur = 0.18
+        if s + dur > duration: dur = duration - s
         cap_path = f"cap_{i}_{random.randint(0,999999)}.png"
         make_caption_image(w, W, cap_path)
         cap_clip = ImageClip(cap_path, duration=dur).set_start(s).set_position(('center', H//2))
@@ -146,8 +159,23 @@ def make_video():
 video_file = make_video()
 thumb_file = make_thumbnail(thumb_text, IS_SHORT)
 
+# YOUTUBE UPLOAD WITH LIMIT PROTECTION
 creds = Credentials(None, refresh_token=os.environ["YT_REFRESH_TOKEN"], client_id=os.environ["YT_CLIENT_ID"], client_secret=os.environ["YT_CLIENT_SECRET"], token_uri="https://oauth2.googleapis.com/token", scopes=["https://www.googleapis.com/auth/youtube.upload"])
 youtube = build("youtube", "v3", credentials=creds)
 body = {"snippet": {"title": title[:100], "description": desc, "tags": tags, "categoryId": "22"}, "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": False}}
-video = youtube.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(video_file)).execute()
-print(f"UPLOADED PRIVATE WITH CAPTION: {video['id']}")
+
+try:
+    video = youtube.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(video_file)).execute()
+    print(f"✅ UPLOADED PRIVATE: {video['id']} - {title}")
+    try:
+        youtube.thumbnails().set(videoId=video['id'], media_body=MediaFileUpload(thumb_file)).execute()
+        print("✅ Thumbnail set")
+    except Exception as e:
+        print(f"Thumbnail error: {e}")
+except HttpError as e:
+    if "uploadLimitExceeded" in str(e):
+        print("⛔ YOUTUBE LIMIT HIT TODAY - SKIPPING UPLOAD. Will retry tomorrow. Video saved as artifact.")
+        exit(0)
+    else:
+        print(f"Upload failed: {e}")
+        raise e
