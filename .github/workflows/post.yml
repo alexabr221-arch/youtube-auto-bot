@@ -1,23 +1,36 @@
-name: Post Shorts and Long
+name: Auto Short
+
 on:
-  workflow_dispatch: # manual only today
   schedule:
-    - cron: '0 14 * * *'
-    - cron: '0 19 * * *'
-    - cron: '0 0 * * *'
+    - cron: '0 11,16,19 * * *'  # 12pm, 5pm, 8pm WAT
+  workflow_dispatch:
+
 jobs:
-  post:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          
       - name: Install deps
-        run: pip install -r requirements.txt
-      - name: Post Video
+        run: pip install moviepy==1.0.3 Pillow edge-tts google-api-python-client google-auth requests
+
+      - name: Run bot
+        run: python main.py
         env:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-        run: python main.py
+      
+      - name: Save video artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: video-output
+          path: |
+            final.mp4
+            thumb.jpg
+            bg.jpg
