@@ -1,4 +1,4 @@
-import os, random, asyncio, requests, urllib.parse, glob, subprocess
+import os, random, asyncio, requests, urllib.parse, glob
 from PIL import Image
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.LANCZOS
@@ -28,15 +28,15 @@ story_raw = random.choice(STORIES)
 def get_ai_prompt_from_story(story):
     s = story.lower()
     if "best friend" in s and "boyfriend" in s:
-        return "shocked woman at apartment door at night catching cheating boyfriend, cinematic dramatic lighting"
+        return "shocked woman at apartment door at night catching cheating boyfriend, cinematic dramatic"
     if "best friend" in s and "girlfriend" in s:
         return "sad young man alone bench night heavy rain heartbroken hoodie cinematic moody"
     if "hotel" in s and "wife" in s:
         return "beautiful young woman white sweater anxious hands near mouth dark hallway cinematic portrait centered ultra realistic"
-    if "second phone" in s or "phone" in s:
+    if "second phone" in s:
         return "man holding two phones shocked discovery cheating dark bedroom cinematic"
     if "mother in law" in s:
-        return "crying woman alone bedroom night holding phone fake messages betrayal"
+        return "crying woman alone bedroom night holding phone fake messages"
     return "lonely heartbroken person rain night cinematic sad dark moody"
 
 def download_ai_background(story, W, H):
@@ -97,78 +97,63 @@ async def make_voice_with_timing(text, file="voice.mp3"):
                 s = chunk["offset"] / 10000000
                 e = s + (chunk["duration"] / 10000000)
                 words.append((s, e, chunk["text"]))
-    print(f"Got {len(words)} words with exact timing")
+    print(f"Got {len(words)} words - PERFECT SYNC READY")
     return file, words
-
-def format_srt_time(seconds):
-    ms = int((seconds - int(seconds)) * 1000)
-    s = int(seconds)
-    h = s // 3600
-    m = (s % 3600) // 60
-    sec = s % 60
-    return f"{h:02}:{m:02}:{sec:02},{ms:03}"
 
 def make_video():
     W,H = (1080,1920) if IS_SHORT else (1920,1080)
     audio_file, word_data = asyncio.run(make_voice_with_timing(story_raw))
     audio = AudioFileClip(audio_file)
     duration = audio.duration
-    print(f"Audio duration: {duration}")
+    print(f"Duration: {duration}s")
     
     bg_path = download_ai_background(story_raw, W, H)
     raw_bg = ImageClip(bg_path)
+    # NO STRETCH - CROP ONLY
     if raw_bg.w / raw_bg.h < W / H:
         raw_bg = raw_bg.resize(width=W)
     else:
         raw_bg = raw_bg.resize(height=H)
-    x1 = (raw_bg.w - W)/2
-    y1 = (raw_bg.h - H)/2
-    bg_clip = raw_bg.crop(x1=x1, y1=y1, width=W, height=H).set_duration(duration).fx(vfx.colorx, 0.6)
+    bg_clip = raw_bg.crop(x1=(raw_bg.w-W)/2, y1=(raw_bg.h-H)/2, width=W, height=H).set_duration(duration).fx(vfx.colorx, 0.6)
 
-    # CREATE SRT - FRAME PERFECT
-    with open("subs.srt", "w", encoding="utf-8") as f:
-        for i, (s, e, w) in enumerate(word_data):
-            if s >= duration: break
-            # Cut exactly at next word start = PERFECT SYNC
-            if i+1 < len(word_data):
-                next_s = word_data[i+1][0]
-                e = min(e + 0.05, next_s)  # tiny overlap to avoid flicker
-            if e > duration: e = duration
-            if e - s < 0.2: e = s + 0.22
-            f.write(f"{i+1}\n{format_srt_time(s)} --> {format_srt_time(e)}\n{w.upper()}\n\n")
+    clips = [bg_clip]
+    # PERFECT SYNC - EXACT TIMING FROM VOICE ENGINE
+    for i, (s, e, w) in enumerate(word_data):
+        if s >= duration: break
+        # Cut at next word start - no gap = fast as voice
+        if i+1 < len(word_data):
+            next_s = word_data[i+1][0]
+            if e > next_s:
+                e = next_s
+        if e - s < 0.15:
+            e = s + 0.18
+        if e > duration:
+            e = duration
+        # White with thick black border - FAST POP
+        txt_clip = TextClip(w.upper(), fontsize=90, color='white', font='DejaVu-Sans-Bold', stroke_color='black', stroke_width=6, method='label').set_duration(e-s).set_start(s).set_position(('center', H//2))
+        clips.append(txt_clip)
 
-    temp_video = "temp_no_cap.mp4"
-    CompositeVideoClip([bg_clip], size=(W,H)).set_audio(audio).write_videofile(temp_video, fps=24, codec="libx264", audio_codec="aac")
-
-    # BURN WITH FFMPEG - ZERO LAG
-    final_video = "final.mp4"
-    # White text, thick black border, bold, centered middle
-    style = "FontName=DejaVu Sans,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,BorderStyle=3,Outline=8,Shadow=0,Bold=1,Alignment=5,MarginV=650"
-    cmd = f'ffmpeg -y -i {temp_video} -vf "subtitles=subs.srt:force_style=\'{style}\'" -c:a copy {final_video}'
-    print(f"Running: {cmd}")
-    subprocess.run(cmd, shell=True, check=True)
-    
-    # Add end card with MoviePy again for subscribe text
+    # End card
     try:
         img = Image.new('RGBA', (W, 300), (0,0,0,0))
         draw = ImageDraw.Draw(img)
-        try: font = ImageFont.truetype("DejaVuSans-Bold.ttf", 62)
+        try: font = ImageFont.truetype("DejaVuSans-Bold.ttf", 60)
         except: font = ImageFont.load_default()
-        txt = "FULL STORY AT 8PM WAT! SUBSCRIBE 🔔"
+        txt = "FULL STORY 8PM WAT! SUBSCRIBE 🔔"
         bbox = draw.textbbox((0,0), txt, font=font)
-        tw = bbox[2]-bbox[0]
-        x = (W-tw)//2
-        draw.text((x, 20), txt, font=font, fill=(255,215,0), stroke_width=4, stroke_fill=(0,0,0))
+        x = (W-(bbox[2]-bbox[0]))//2
+        draw.text((x, 20), txt, font=font, fill=(255,215,0), stroke_width=3, stroke_fill=(0,0,0))
         img.save("endcard.png")
-        end_clip = ImageClip("endcard.png", duration=3).set_position(("center", H-400))
-        video_with_cap = VideoFileClip(final_video)
-        final = CompositeVideoClip([video_with_cap, end_clip.set_start(max(0, video_with_cap.duration-3))], size=(W,H))
-        final.write_videofile("final2.mp4", fps=24, codec="libx264", audio_codec="aac")
-        return "final2.mp4"
-    except:
-        return final_video
+        end_clip = ImageClip("endcard.png", duration=3).set_start(max(0, duration-3)).set_position(("center", H-450))
+        clips.append(end_clip)
+    except Exception as e:
+        print(f"Endcard error: {e}")
 
-# === RUN - PRIVATE FOR TEST ===
+    final = CompositeVideoClip(clips, size=(W,H)).set_audio(audio)
+    final.write_videofile("final.mp4", fps=24, codec="libx264", audio_codec="aac")
+    return "final.mp4"
+
+# === RUN - PRIVATE ===
 video_file = make_video()
 thumb_file = make_thumbnail(thumb_text, IS_SHORT)
 
@@ -176,10 +161,9 @@ creds = Credentials(None, refresh_token=os.environ["YT_REFRESH_TOKEN"], client_i
 youtube = build("youtube", "v3", credentials=creds)
 body = {"snippet": {"title": title[:100], "description": desc, "tags": tags, "categoryId": "22"}, "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": False}}
 video = youtube.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(video_file)).execute()
-vid_id = video["id"]
-print(f"UPLOADED PRIVATE PERFECT SYNC: {vid_id} - Check on PHONE, not GitHub preview!")
+print(f"UPLOADED PRIVATE PERFECT: {video['id']}")
 
 try:
-    youtube.commentThreads().insert(part="snippet", body={"snippet": {"videoId": vid_id, "topLevelComment": {"snippet": {"textOriginal": "🔔 Full story at 8PM WAT - Subscribe so YouTube notifies you! What would YOU do?"}}}}).execute()
+    youtube.commentThreads().insert(part="snippet", body={"snippet": {"videoId": video["id"], "topLevelComment": {"snippet": {"textOriginal": "🔔 Full story at 8PM WAT - Subscribe so YouTube notifies you! What would YOU do?"}}}}).execute()
 except Exception as e:
     print(f"Comment failed: {e}")
