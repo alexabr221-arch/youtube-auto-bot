@@ -1,6 +1,6 @@
 name: Post Shorts and Long
 on:
-  workflow_dispatch:
+  workflow_dispatch: # manual only today
   schedule:
     - cron: '0 14 * * *'
     - cron: '0 19 * * *'
