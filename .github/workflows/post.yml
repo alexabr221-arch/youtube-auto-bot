@@ -3,9 +3,9 @@ name: Post Shorts and Long
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 14 * * *'  # SHORT - 10AM NY / 3PM Lagos
-    - cron: '0 19 * * *'  # SHORT - 3PM NY / 8PM Lagos - PEAK
-    - cron: '0 0 * * *'   # LONG - 8PM NY / 1AM Lagos - Best for long
+    - cron: '0 14 * * *'
+    - cron: '0 19 * * *'
+    - cron: '0 0 * * *'
 
 jobs:
   post:
