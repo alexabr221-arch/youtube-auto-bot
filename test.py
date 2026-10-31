@@ -9,46 +9,36 @@ import edge_tts
 W, H = (1080,1920)
 story_raw = "My boyfriend told me he goes to gym every night at 9pm. Last night I followed him. He didn't go to gym. He parked at my best friend's apartment. She opened wearing my lost dress."
 
-def get_better_prompts():
-    # THESE PROMPTS ARE TESTED TO BE CATCHY - closeup face = subs
-    return [
-        "extremely beautiful young woman shocked face closeup, big eyes tears, betrayal expression, dramatic cinematic lighting, inside car night, photorealistic skin texture, 8k, ultra detailed face, instagram model",
-        "beautiful woman mouth open shocked at apartment door catching cheating boyfriend, best friend behind in dress, dramatic lighting, photorealistic",
-        "stunning heartbroken woman crying in dark bedroom alone, tears on cheeks, emotional, beautiful, photorealistic closeup, cinematic"
-    ]
+def download_one_image(story):
+    # ONE perfect prompt that matches your story
+    s = story.lower()
+    if "best friend" in s and "boyfriend" in s:
+        prompt = "beautiful young woman sitting in car at night shocked betrayed face closeup watching apartment, tears, heartbroken, dramatic cinematic lighting, ultra realistic, 8k, detailed skin, looking through window"
+    else:
+        prompt = f"beautiful woman emotional shocked face closeup, story about {story[:60]}, cinematic, ultra realistic, 8k"
 
-def download_images():
-    prompts = get_better_prompts()
-    pairs = []
-    for idx, prompt in enumerate(prompts):
-        full = f"{prompt}, portrait photo, sharp focus on face, center framed, looking at camera, bokeh background, highly detailed"
-        safe = urllib.parse.quote(full)
-        # TRY FLUX + TURBO for best quality
-        for model in ["flux", "flux-realism", "turbo"]:
-            try:
-                url = f"https://image.pollinations.ai/prompt/{safe}?width=768&height=1280&model={model}&nologo=true&seed={random.randint(1,999999)}&enhance=true"
-                print(f"Trying {model} for image {idx+1}")
-                r = requests.get(url, timeout=120)
-                if r.status_code == 200 and len(r.content) > 15000:
-                    open(f"bg_{idx}.jpg","wb").write(r.content)
-                    # MAKE BLURRED BG - LIGHT, NOT DARK
-                    im = Image.open(f"bg_{idx}.jpg")
-                    blurred = im.filter(ImageFilter.GaussianBlur(12))
-                    blurred.save(f"bg_{idx}_blur.jpg")
-                    pairs.append((f"bg_{idx}.jpg", f"bg_{idx}_blur.jpg"))
-                    print(f"✅ Image {idx+1} GOOD - {len(r.content)} bytes")
-                    break
-            except Exception as e:
-                print(f"fail {e}")
-                continue
-    if not pairs:
-        r = requests.get(f"https://picsum.photos/768/1280?random={random.randint(1,5000)}", timeout=20)
-        open("bg_0.jpg","wb").write(r.content)
-        Image.open("bg_0.jpg").filter(ImageFilter.GaussianBlur(12)).save("bg_0_blur.jpg")
-        pairs = [("bg_0.jpg","bg_0_blur.jpg")]*3
-    while len(pairs) < 3:
-        pairs.append(pairs[0])
-    return pairs
+    full = f"{prompt}, portrait photo, sharp focus on eyes, center framed, photorealistic, instagram model"
+    safe = urllib.parse.quote(full)
+    url = f"https://image.pollinations.ai/prompt/{safe}?width=768&height=1280&model=flux&nologo=true&enhance=true&seed={random.randint(1,999999)}"
+    
+    try:
+        print(f"Generating ONE image: {prompt[:50]}...")
+        r = requests.get(url, timeout=120)
+        if r.status_code == 200 and len(r.content) > 10000:
+            open("bg.jpg","wb").write(r.content)
+            im = Image.open("bg.jpg")
+            blurred = im.filter(ImageFilter.GaussianBlur(15))
+            blurred.save("bg_blur.jpg")
+            print(f"✅ ONE image ready - {len(r.content)} bytes")
+            return "bg.jpg", "bg_blur.jpg"
+    except Exception as e:
+        print(f"Error {e}")
+
+    # fallback
+    r = requests.get(f"https://picsum.photos/768/1280?random={random.randint(1,5000)}", timeout=20)
+    open("bg.jpg","wb").write(r.content)
+    Image.open("bg.jpg").filter(ImageFilter.GaussianBlur(15)).save("bg_blur.jpg")
+    return "bg.jpg", "bg_blur.jpg"
 
 async def make_voice(text, file="voice.mp3"):
     communicate = edge_tts.Communicate(text, "en-US-AriaNeural", rate="+8%")
@@ -58,16 +48,13 @@ async def make_voice(text, file="voice.mp3"):
             if chunk["type"] == "audio": f.write(chunk["data"])
             elif chunk["type"] == "WordBoundary": 
                 words.append((chunk["offset"]/10000000, (chunk["offset"]+chunk["duration"])/10000000, chunk["text"]))
-    print(f"Words detected: {len(words)}")
     return file, words
 
 def make_caption(text, duration, start):
-    img = Image.new('RGBA', (W, 600), (0,0,0,0))
+    img = Image.new('RGBA', (W, 650), (0,0,0,0))
     draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 85)
-    except:
-        font = ImageFont.load_default()
+    try: font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 85)
+    except: font = ImageFont.load_default()
     lines = textwrap.wrap(text.upper(), width=14)
     y = 10
     for line in lines[:2]:
@@ -75,7 +62,6 @@ def make_caption(text, duration, start):
         tw = bbox[2]-bbox[0]
         th = bbox[3]-bbox[1]
         x = (W - tw)//2
-        # THICK BLACK STROKE FOR READABILITY
         for dx in range(-7,8):
             for dy in range(-7,8):
                 draw.text((x+dx, y+dy), line, font=font, fill=(0,0,0,255))
@@ -84,7 +70,6 @@ def make_caption(text, duration, start):
     path = f"cap_{int(start*1000)}_{random.randint(0,9999)}.png"
     img.save(path)
     clip = ImageClip(path, duration=duration).set_start(start).set_position(("center", H*0.62))
-    # POP
     clip = clip.resize(lambda t: 0.7 + 0.3*min(t*6,1) if t < 0.15 else 1)
     return clip
 
@@ -92,47 +77,35 @@ def make_video():
     audio_file, word_data = asyncio.run(make_voice(story_raw))
     voice = AudioFileClip(audio_file)
     total = min(voice.duration, 44)
-    print(f"Total duration: {total}s")
+    print(f"Duration: {total}s")
 
-    image_pairs = download_images()
-    change = total / len(image_pairs)
-    print(f"Change every: {change}s")
+    sharp_path, blur_path = download_one_image(story_raw)
 
-    # FIX 1: NO DARK - bright blurred bg + bright center image
-    video_parts = []
-    for i, (sharp_path, blur_path) in enumerate(image_pairs):
-        start = i * change
-        # Blurred bg - COVERS FULL SCREEN, BRIGHT
-        bg = ImageClip(blur_path, duration=change).set_start(start)
-        bg = bg.resize(height=H) if bg.w/bg.h < W/H else bg.resize(width=W)
-        if bg.w < W: bg = bg.resize(width=W)
-        if bg.h < H: bg = bg.resize(height=H)
-        bg = bg.crop(x_center=bg.w/2, y_center=bg.h/2, width=W, height=H)
-        bg = bg.fx(vfx.colorx, 0.9)  # NOT DARK - 0.9 bright
+    # ONE BACKGROUND - NEVER DISAPPEARS, NEVER DARK
+    bg = ImageClip(blur_path, duration=total)
+    bg = bg.resize(height=H) if bg.w/bg.h < W/H else bg.resize(width=W)
+    if bg.w < W: bg = bg.resize(width=W)
+    if bg.h < H: bg = bg.resize(height=H)
+    bg = bg.crop(x_center=bg.w/2, y_center=bg.h/2, width=W, height=H)
+    bg = bg.fx(vfx.colorx, 0.85) # BRIGHT
 
-        # Sharp center - NORMAL SIZE, BRIGHT
-        fg = ImageClip(sharp_path, duration=change).set_start(start)
-        fg = fg.resize(height=1400)
-        if fg.w > 1000: fg = fg.resize(width=1000)
-        fg = fg.set_position(("center", "center")).fx(vfx.colorx, 1.1)  # BRIGHTER
+    fg = ImageClip(sharp_path, duration=total)
+    fg = fg.resize(height=1400)
+    if fg.w > 1000: fg = fg.resize(width=1000)
+    fg = fg.set_position(("center", "center")).fx(vfx.colorx, 1.1)
 
-        part = CompositeVideoClip([bg, fg], size=(W,H)).set_duration(change).set_start(start)
-        video_parts.append(part)
+    background = CompositeVideoClip([bg, fg], size=(W,H)).set_duration(total)
 
-    # This composite NEVER goes dark / disappear
-    background = CompositeVideoClip(video_parts, size=(W,H)).set_duration(total)
-
-    # FIX 2: GUARANTEED CAPTIONS - even if edge_tts timing fails
+    # GUARANTEED CAPTIONS
     captions = []
-    if len(word_data) < 5:  # FALLBACK if no timing
+    if len(word_data) < 5:
         print("Using fallback captions")
         words = story_raw.split()
-        chunk_size = 3
-        cap_duration = total / (len(words)//chunk_size + 1)
-        for idx in range(0, len(words), chunk_size):
-            phrase = " ".join(words[idx:idx+chunk_size])
-            s = idx//chunk_size * cap_duration
-            captions.append(make_caption(phrase, cap_duration, s))
+        cap_dur = total / (len(words)//3 + 1)
+        for idx in range(0, len(words), 3):
+            phrase = " ".join(words[idx:idx+3])
+            s = idx//3 * cap_dur
+            captions.append(make_caption(phrase, cap_dur, s))
     else:
         i = 0
         while i < len(word_data):
@@ -144,10 +117,10 @@ def make_video():
             if s < total:
                 captions.append(make_caption(phrase, d, s))
 
-    print(f"Creating {len(captions)} captions")
+    print(f"{len(captions)} captions")
     final = CompositeVideoClip([background] + captions, size=(W,H)).set_duration(total).set_audio(voice)
     final.write_videofile("final.mp4", fps=24, codec="libx264", audio_codec="aac", preset="ultrafast")
-    print("✅ VIDEO DONE - bright, changing, with captions")
+    print("✅ DONE - ONE image, bright, with captions")
 
 if __name__ == "__main__":
     make_video()
