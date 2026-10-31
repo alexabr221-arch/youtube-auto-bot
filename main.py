@@ -139,6 +139,22 @@ STORIES = [
 "My ex said I'm not beautiful. My husband tells me daily I'm most beautiful.",
 "My boss said I will never be manager. I now manager in his competitor company with double pay."
 ]
+
+def expand_to_8mins_story(short_idea):
+    prompt = f"You are a viral storyteller. Expand this idea into a 1000-word FIRST-PERSON emotional true story that keeps viewers hooked till end. Add dialogue, suspense, twist, revenge ending. Make it make sense, emotional, and subscribe-worthy.\n\nIDEA: {short_idea}\n\nWrite 1000 words, paragraph by paragraph, no bullet points, make it feel real and dramatic. Start immediately with story, no intro like 'Here is story'."
+    try:
+        encoded = urllib.parse.quote(prompt)
+        url = f"https://text.pollinations.ai/{encoded}?model=openai&seed={random.randint(1,999999)}"
+        r = requests.get(url, timeout=90)
+        if r.status_code == 200 and len(r.text) > 500:
+            long_story = r.text.strip().replace("**", "").replace("##", "")
+            if len(long_story.split()) >= 600:
+                print(f"✅ Expanded to {len(long_story.split())} words")
+                return long_story
+    except Exception as e:
+        print(f"Expansion failed {e}")
+    return f"{short_idea} Let me tell you exactly what happened that night. I couldn't believe my eyes. My heart was beating so fast. {short_idea} I stood there frozen for 5 minutes. Then I decided to follow him quietly. What I saw next broke me completely. {short_idea} I never thought the person I trusted most would do this to me. But that night changed everything. {short_idea}"
+
 today_str = str(date.today())
 START_DATE = date(2026, 10, 31)
 days_since_start = (date.today() - START_DATE).days
@@ -161,12 +177,13 @@ elif utc_hour == 16:
     story_raw = part2_text
     part_label = "Part 2"
 else:
-    story_raw = full_text
+    print("Expanding story for 8-min LONG video...")
+    expanded = expand_to_8mins_story(full_text)
+    story_raw = expanded
     part_label = "Full Story"
+    print(f"LONG story length: {len(story_raw.split())} words = ~{len(story_raw.split())/130:.1f} mins")
 print(f"DAY {days_since_start} / {len(STORIES)} - Story {story_index}: {part_label}")
 
-
-# === NEW: ONE IMAGE LOGIC - BRIGHT + CATCHY + MATCHES STORY ===
 def get_one_ai_prompt(story):
     s = story.lower()
     if "best friend" in s and "boyfriend" in s: 
@@ -183,7 +200,6 @@ def get_one_ai_prompt(story):
         return "young man shocked angry boss shouting office cinematic photorealistic"
     if "sister" in s or "brother" in s:
         return "siblings fighting shouting house family drama closeup photorealistic"
-    # default emotional
     return f"beautiful heartbroken person shocked betrayed face closeup tears emotional photorealistic, story about {story[:50]}"
 
 def download_ai_background(W, H):
@@ -196,7 +212,6 @@ def download_ai_background(W, H):
         r = requests.get(url, timeout=120)
         if r.status_code == 200 and len(r.content) > 12000:
             open("bg.jpg","wb").write(r.content)
-            # CREATE BRIGHT BLURRED BG - NO DARK
             im = Image.open("bg.jpg")
             blurred = im.filter(ImageFilter.GaussianBlur(15))
             blurred.save("bg_blur.jpg")
@@ -208,6 +223,7 @@ def download_ai_background(W, H):
     open("bg.jpg","wb").write(r.content)
     Image.open("bg.jpg").filter(ImageFilter.GaussianBlur(15)).save("bg_blur.jpg")
     return "bg.jpg", "bg_blur.jpg"
+
 def viral_pack(story, is_short, part_label, full_story_for_title):
     s = full_story_for_title.lower()
     rand = random.randint(100,999)
@@ -249,24 +265,13 @@ def viral_pack(story, is_short, part_label, full_story_for_title):
     if is_short: title += " #shorts"
     tags = ["shorts","reddit stories","cheating","storytime","betrayal","drama","relationship","true story", f"story{rand}"]
     return title[:100], desc, tags
-
-    else:
-        titles = ["My Partner Cheated For Months Until I Did THIS - Full Story","My Best Friend Stole My Girlfriend And I Got Ultimate Revenge - Full Story","My Mother In Law Tried To Destroy My Marriage - Full Story"]
-        desc = f"{story}\n\nThis is the FULL story from today's shorts. What would YOU do? Comment below!\n\nSubscribe for daily shocking true stories!\n\n#redditstories #cheating #storytime #drama #aitah #relationships"
-    title = random.choice(titles)
-    rand = random.randint(100,999)
-    title = f"{title} | True Story {rand}"
-    if is_short: title += " #shorts"
-    tags = ["shorts","reddit stories","cheating","storytime","betrayal","drama","relationship","true story", f"story{rand}"]
-    return title, desc, tags
-
 title, desc, tags = viral_pack(story_raw, IS_SHORT, part_label, story_raw_full)
 
 def download_music():
     s = story_raw.lower()
     sad_piano = ["https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3","https://cdn.pixabay.com/download/audio/2021/10/25/audio_8ef06f090a.mp3?filename=sad-piano-110694.mp3"]
-    emotional_chill = ["https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a65019.mp3?filename=lofi-chill-113561.mp3","https://cdn.pixabay.com/download/audio/2022/06/07/audio_b9bd4170e8.mp3?filename=emotional-piano-112199.mp3"]
-    tense_suspense = ["https://cdn.pixabay.com/download/audio/2022/01/18/audio_d1718ab41b.mp3?filename=suspense-ambient-110410.mp3","https://cdn.pixabay.com/download/audio/2021/11/25/audio_852d8aad6c.mp3?filename=dark-ambient-110998.mp3"]
+    emotional_chill = ["https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a65019.mp3?filename=lofi-chill-113561.mp3"]
+    tense_suspense = ["https://cdn.pixabay.com/download/audio/2022/01/18/audio_d1718ab41b.mp3?filename=suspense-ambient-110410.mp3"]
     hopeful = ["https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3?filename=little-break-110364.mp3"]
     if any(x in s for x in ["cheat","boyfriend","girlfriend","wife","husband","caught"]): pool = sad_piano
     elif any(x in s for x in ["best friend","friend","betray","stole"]): pool = emotional_chill
@@ -326,7 +331,6 @@ def make_caption_clip(text, W, H, duration, start):
         tw = bbox[2]-bbox[0]
         th = bbox[3]-bbox[1]
         x = (W - tw)//2
-        # THICK stroke for viral look
         for dx in range(-4,5):
             for dy in range(-4,5):
                 if dx!=0 or dy!=0: draw.text((x+dx, y+dy), line, font=font, fill=(0,0,0,255))
@@ -335,7 +339,6 @@ def make_caption_clip(text, W, H, duration, start):
     path = f"cap_{int(start*1000)}_{random.randint(0,99999)}.png"
     img.save(path)
     clip = ImageClip(path, duration=duration).set_start(start).set_position(("center", H*0.62))
-    # POP effect
     clip = clip.resize(lambda t: 0.7 + 0.3*min(t*6,1) if t < 0.15 else 1)
     return clip
 
@@ -399,7 +402,13 @@ def make_video():
     W,H = (1080,1920) if IS_SHORT else (1920,1080)
     audio_file, word_data = asyncio.run(make_voice_with_timing(story_raw))
     voice_audio = AudioFileClip(audio_file)
-    duration = min(voice_audio.duration, 44 if IS_SHORT else 480)
+    if IS_SHORT:
+        duration = min(voice_audio.duration, 44)
+    else:
+        duration = voice_audio.duration
+        if duration < 480:
+            duration = 480
+            print(f"Forcing duration to 8 mins minimum, voice is {voice_audio.duration:.1f}s")
     music_path = download_music()
     if music_path:
         try:
@@ -409,15 +418,11 @@ def make_video():
             final_audio = voice_audio.set_duration(duration)
     else:
         final_audio = voice_audio.set_duration(duration)
-
-    # === ONE IMAGE ONLY - NEVER DISAPPEARS, BRIGHT ===
     sharp_path, blur_path = download_ai_background(W, H)
-    
     bg_blur = ImageClip(blur_path, duration=duration)
     if bg_blur.w / bg_blur.h < W / H: bg_blur = bg_blur.resize(width=W)
     else: bg_blur = bg_blur.resize(height=H)
     bg_blur = bg_blur.crop(x1=bg_blur.w//2 - W//2, y1=bg_blur.h//2 - H//2, width=W, height=H).fx(vfx.colorx, 0.9)
-
     fg = ImageClip(sharp_path, duration=duration)
     if IS_SHORT:
         fg = fg.resize(height=1350)
@@ -427,10 +432,7 @@ def make_video():
         fg = fg.resize(height=H*0.85)
         if fg.w > W*0.6: fg = fg.resize(width=W*0.6)
         fg = fg.set_position(("center", "center")).fx(vfx.colorx, 1.1)
-
     bg_clip = CompositeVideoClip([bg_blur, fg], size=(W,H)).set_duration(duration)
-
-    # === GUARANTEED CAPTIONS - ALWAYS SHOW ===
     caps = []
     if word_data and len(word_data) > 3:
         i = 0
@@ -452,14 +454,12 @@ def make_video():
             if start_time < duration:
                 caps.append(make_caption_clip(text, W, H, dur, start_time))
     else:
-        # FALLBACK - will still show captions even if edge_tts timing fails
         print("Fallback captions")
         words = story_raw.split()
         chunk_duration = duration / max(1, len(words)//4 + 1)
         for idx in range(0, len(words), 4):
             text = " ".join(words[idx:idx+4])
             caps.append(make_caption_clip(text, W, H, chunk_duration, idx//4*chunk_duration))
-
     print(f"Creating {len(caps)} captions")
     end_card = make_end_card(W, H, duration)
     final = CompositeVideoClip([bg_clip]+caps+[end_card], size=(W,H)).set_duration(duration).set_audio(final_audio)
@@ -473,11 +473,10 @@ body = {"snippet": {"title": title[:100], "description": desc, "tags": tags, "ca
 video = youtube.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(video_file)).execute()
 vid_id = video["id"]
 print(f"UPLOADED {today_str} {'SHORT' if IS_SHORT else 'LONG'}: {vid_id} | {title}")
-
 if not IS_SHORT:
     try:
         thumb_file = make_thumbnail_for_long(bg_used, story_raw)
         youtube.thumbnails().set(videoId=vid_id, media_body=MediaFileUpload(thumb_file, mimetype="image/jpeg")).execute()
         print(f"Viral thumbnail with image uploaded!")
     except Exception as e:
-        print(f"Thumbnail failed: {e}")
+        print(f"Thumbnail failed: {e}")    
