@@ -1,5 +1,5 @@
 import os, random, textwrap, asyncio, requests, urllib.parse, json
-from PIL import Image
+from PIL import Image, ImageFilter
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.LANCZOS
 from datetime import datetime, timezone, date
@@ -161,31 +161,48 @@ else:
     posted[today_str] = story_raw
     open(posted_file, "w").write(json.dumps(posted))
 
-def get_ai_prompt_from_story(story):
+# === NEW: ONE IMAGE LOGIC - BRIGHT + CATCHY + MATCHES STORY ===
+def get_one_ai_prompt(story):
     s = story.lower()
-    if "best friend" in s and "boyfriend" in s: return "shocked woman catching cheating boyfriend and best friend at apartment door night cinematic dramatic"
-    if "best friend" in s and "girlfriend" in s: return "sad man heartbroken sitting alone in rain at night betrayal cinematic moody"
-    if "hotel" in s: return "man walking down dark hotel hallway at night noir cinematic dramatic"
-    if "phone" in s: return "person holding two phones shocked discovery cheating in dark bedroom cinematic"
-    if "mother in law" in s: return "angry mother in law shouting at young wife in living room family drama cinematic"
-    if "boss" in s: return "angry boss shouting at employee in office cinematic dramatic"
-    if "sister" in s or "brother" in s: return "siblings arguing loudly in house family fight cinematic"
-    return "lonely heartbroken person sitting alone at night sad betrayal cinematic dramatic"
+    if "best friend" in s and "boyfriend" in s: 
+        return "extremely beautiful young woman in car at night shocked betrayed face closeup tears, watching apartment, dramatic lighting, photorealistic skin texture, 8k"
+    if "best friend" in s and "girlfriend" in s:
+        return "handsome heartbroken man shocked in rain at night betrayal tears closeup photorealistic 8k dramatic"
+    if "hotel" in s: 
+        return "man standing in dark hotel hallway shocked face closeup noir cinematic photorealistic"
+    if "second phone" in s or "phone" in s:
+        return "woman holding two phones shocked discovery cheating bedroom night photorealistic closeup"
+    if "mother in law" in s:
+        return "beautiful young wife crying angry mother in law shouting living room drama photorealistic closeup"
+    if "boss" in s:
+        return "young man shocked angry boss shouting office cinematic photorealistic"
+    if "sister" in s or "brother" in s:
+        return "siblings fighting shouting house family drama closeup photorealistic"
+    # default emotional
+    return f"beautiful heartbroken person shocked betrayed face closeup tears emotional photorealistic, story about {story[:50]}"
 
-def download_ai_background(story, W, H):
-    prompt = get_ai_prompt_from_story(story)
-    safe = urllib.parse.quote(prompt + ", ultra realistic, 8k, cinematic, dramatic lighting")
-    url = f"https://image.pollinations.ai/prompt/{safe}?width={W}&height={H}&model=flux&nologo=true&seed={random.randint(1,999999)}"
+def download_ai_background(W, H):
+    prompt = get_one_ai_prompt(story_raw)
+    full = f"{prompt}, portrait photo, sharp focus on eyes, center framed, instagram model, highly detailed face, 8k"
+    safe = urllib.parse.quote(full)
+    url = f"https://image.pollinations.ai/prompt/{safe}?width=768&height=1280&model=flux&nologo=true&enhance=true&seed={random.randint(1,999999)}"
     try:
-        r = requests.get(url, timeout=90)
-        if r.status_code == 200 and len(r.content) > 5000:
+        print(f"Generating ONE image matching story...")
+        r = requests.get(url, timeout=120)
+        if r.status_code == 200 and len(r.content) > 12000:
             open("bg.jpg","wb").write(r.content)
-            return "bg.jpg"
+            # CREATE BRIGHT BLURRED BG - NO DARK
+            im = Image.open("bg.jpg")
+            blurred = im.filter(ImageFilter.GaussianBlur(15))
+            blurred.save("bg_blur.jpg")
+            print(f"✅ ONE image good - {len(r.content)} bytes")
+            return "bg.jpg", "bg_blur.jpg"
     except Exception as e:
         print(f"AI fail {e}")
-    r = requests.get(f"https://picsum.photos/{W}/{H}?random={random.randint(1,5000)}", timeout=20)
+    r = requests.get(f"https://picsum.photos/768/1280?random={random.randint(1,5000)}", timeout=20)
     open("bg.jpg","wb").write(r.content)
-    return "bg.jpg"
+    Image.open("bg.jpg").filter(ImageFilter.GaussianBlur(15)).save("bg_blur.jpg")
+    return "bg.jpg", "bg_blur.jpg"
 
 def viral_pack(story, is_short):
     if is_short:
@@ -252,28 +269,33 @@ async def make_voice_with_timing(text, file="voice.mp3"):
         async for chunk in communicate.stream():
             if chunk["type"] == "audio": f.write(chunk["data"])
             elif chunk["type"] == "WordBoundary": words.append((chunk["offset"]/10000000, chunk["offset"]/10000000 + chunk["duration"]/10000000, chunk["text"]))
+    print(f"Words detected: {len(words)}")
     return file, words
 
 def make_caption_clip(text, W, H, duration, start):
-    img = Image.new('RGBA', (W, 300), (0,0,0,0))
+    img = Image.new('RGBA', (W, 400), (0,0,0,0))
     draw = ImageDraw.Draw(img)
-    try: font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 52 if W==1080 else 42)
+    try: font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 58 if W==1080 else 46)
     except: font = ImageFont.load_default()
-    lines = textwrap.wrap(text.upper(), width=20 if W==1080 else 35)
+    lines = textwrap.wrap(text.upper(), width=18 if W==1080 else 32)
     y = 10
     for line in lines[:2]:
         bbox = draw.textbbox((0,0), line, font=font)
         tw = bbox[2]-bbox[0]
         th = bbox[3]-bbox[1]
         x = (W - tw)//2
-        for dx in [-3,0,3]:
-            for dy in [-3,0,3]:
+        # THICK stroke for viral look
+        for dx in range(-4,5):
+            for dy in range(-4,5):
                 if dx!=0 or dy!=0: draw.text((x+dx, y+dy), line, font=font, fill=(0,0,0,255))
         draw.text((x, y), line, font=font, fill=(255,255,255,255))
-        y += th + 10
+        y += th + 12
     path = f"cap_{int(start*1000)}_{random.randint(0,99999)}.png"
     img.save(path)
-    return ImageClip(path, duration=duration).set_start(start).set_position(("center", H//2))
+    clip = ImageClip(path, duration=duration).set_start(start).set_position(("center", H*0.62))
+    # POP effect
+    clip = clip.resize(lambda t: 0.7 + 0.3*min(t*6,1) if t < 0.15 else 1)
+    return clip
 
 def make_end_card(W, H, duration):
     img = Image.new('RGBA', (W, 180), (0,0,0,0))
@@ -345,48 +367,62 @@ def make_video():
             final_audio = voice_audio.set_duration(duration)
     else:
         final_audio = voice_audio.set_duration(duration)
-    bg_path = download_ai_background(story_raw, W, H)
-    raw_bg = ImageClip(bg_path, duration=duration)
-    if raw_bg.w / raw_bg.h < W / H: raw_bg = raw_bg.resize(width=W)
-    else: raw_bg = raw_bg.resize(height=H)
-    bg_clip = raw_bg.crop(x1=raw_bg.w//2 - W//2, y1=raw_bg.h//2 - H//2, width=W, height=H).fx(vfx.colorx, 0.6)
 
-    # === INSTANT SYNC - WHATEVER WORDS VOICE SAYS, APPEARS IMMEDIATELY ===
+    # === ONE IMAGE ONLY - NEVER DISAPPEARS, BRIGHT ===
+    sharp_path, blur_path = download_ai_background(W, H)
+    
+    bg_blur = ImageClip(blur_path, duration=duration)
+    if bg_blur.w / bg_blur.h < W / H: bg_blur = bg_blur.resize(width=W)
+    else: bg_blur = bg_blur.resize(height=H)
+    bg_blur = bg_blur.crop(x1=bg_blur.w//2 - W//2, y1=bg_blur.h//2 - H//2, width=W, height=H).fx(vfx.colorx, 0.9)
+
+    fg = ImageClip(sharp_path, duration=duration)
+    if IS_SHORT:
+        fg = fg.resize(height=1350)
+        if fg.w > 950: fg = fg.resize(width=950)
+        fg = fg.set_position(("center", "center")).fx(vfx.colorx, 1.1)
+    else:
+        fg = fg.resize(height=H*0.85)
+        if fg.w > W*0.6: fg = fg.resize(width=W*0.6)
+        fg = fg.set_position(("center", "center")).fx(vfx.colorx, 1.1)
+
+    bg_clip = CompositeVideoClip([bg_blur, fg], size=(W,H)).set_duration(duration)
+
+    # === GUARANTEED CAPTIONS - ALWAYS SHOW ===
     caps = []
-    if word_data and len(word_data) > 2:
+    if word_data and len(word_data) > 3:
         i = 0
         while i < len(word_data):
-            start_time = word_data[i][0] # EXACT millisecond voice says first word
+            start_time = word_data[i][0]
             phrase_words = []
-            # Take 5 words (you can change to 4,6 - still instant)
-            for k in range(5):
+            for k in range(4):
                 if i + k >= len(word_data): break
                 phrase_words.append(word_data[i + k][2])
-                if word_data[i + k][2].endswith(('.', '!', '?')) and len(phrase_words) >= 3:
-                    break
             if not phrase_words: break
             text = " ".join(phrase_words)
             i += len(phrase_words)
-            # Duration = until next phrase starts - so instant switch
             if i < len(word_data):
                 next_start = word_data[i][0]
                 dur = next_start - start_time
             else:
                 dur = (word_data[-1][1] - start_time) + 0.3
-            dur = max(0.4, min(dur, 1.8))
+            dur = max(0.5, min(dur, 1.5))
             if start_time < duration:
                 caps.append(make_caption_clip(text, W, H, dur, start_time))
     else:
+        # FALLBACK - will still show captions even if edge_tts timing fails
+        print("Fallback captions")
         words = story_raw.split()
-        chunk_duration = duration / max(1, len(words)//5 + 1)
-        for idx in range(0, len(words), 5):
-            text = " ".join(words[idx:idx+5])
-            caps.append(make_caption_clip(text, W, H, chunk_duration, idx//5*chunk_duration))
+        chunk_duration = duration / max(1, len(words)//4 + 1)
+        for idx in range(0, len(words), 4):
+            text = " ".join(words[idx:idx+4])
+            caps.append(make_caption_clip(text, W, H, chunk_duration, idx//4*chunk_duration))
 
+    print(f"Creating {len(caps)} captions")
     end_card = make_end_card(W, H, duration)
-    final = CompositeVideoClip([bg_clip]+caps+[end_card], size=(W,H)).set_audio(final_audio)
-    final.write_videofile("final.mp4", fps=24, codec="libx264", audio_codec="aac")
-    return "final.mp4", bg_path
+    final = CompositeVideoClip([bg_clip]+caps+[end_card], size=(W,H)).set_duration(duration).set_audio(final_audio)
+    final.write_videofile("final.mp4", fps=24, codec="libx264", audio_codec="aac", preset="ultrafast")
+    return "final.mp4", sharp_path
 
 video_file, bg_used = make_video()
 creds = Credentials(None, refresh_token=os.environ["YT_REFRESH_TOKEN"], client_id=os.environ["YT_CLIENT_ID"], client_secret=os.environ["YT_CLIENT_SECRET"], token_uri="https://oauth2.googleapis.com/token", scopes=["https://www.googleapis.com/auth/youtube.upload"])
