@@ -139,27 +139,32 @@ STORIES = [
 "My ex said I'm not beautiful. My husband tells me daily I'm most beautiful.",
 "My boss said I will never be manager. I now manager in his competitor company with double pay."
 ]
-
 today_str = str(date.today())
-posted_file = "posted.json"
-posted = {}
-if os.path.exists(posted_file):
-    try:
-        data = json.loads(open(posted_file).read())
-        if isinstance(data, dict): posted = data
-    except: posted = {}
-
-if today_str in posted:
-    story_raw = posted[today_str]
+START_DATE = date(2026, 10, 31)
+days_since_start = (date.today() - START_DATE).days
+if days_since_start < 0: days_since_start = 0
+story_index = days_since_start % len(STORIES)
+story_raw_full = STORIES[story_index]
+words = story_raw_full.split()
+if len(words) <= 70:
+    part1_text = story_raw_full + " To be continued at 5pm. Full story at 8pm!"
+    part2_text = story_raw_full + " Full shocking ending at 8pm tonight!"
+    full_text = story_raw_full
 else:
-    used = list(posted.values())
-    available = [s for s in STORIES if s not in used]
-    if len(available) < 5:
-        available = STORIES
-        posted = {}
-    story_raw = random.choice(available)
-    posted[today_str] = story_raw
-    open(posted_file, "w").write(json.dumps(posted))
+    part1_text = " ".join(words[:70]) + "... To be continued at 5pm! Part 2 drops next. Full story at 8pm!"
+    part2_text = " ".join(words[70:140]) + " ... Final full story at 8pm tonight! Don't miss it!"
+    full_text = story_raw_full
+if utc_hour == 11:
+    story_raw = part1_text
+    part_label = "Part 1"
+elif utc_hour == 16:
+    story_raw = part2_text
+    part_label = "Part 2"
+else:
+    story_raw = full_text
+    part_label = "Full Story"
+print(f"DAY {days_since_start} / {len(STORIES)} - Story {story_index}: {part_label}")
+
 
 # === NEW: ONE IMAGE LOGIC - BRIGHT + CATCHY + MATCHES STORY ===
 def get_one_ai_prompt(story):
@@ -203,11 +208,48 @@ def download_ai_background(W, H):
     open("bg.jpg","wb").write(r.content)
     Image.open("bg.jpg").filter(ImageFilter.GaussianBlur(15)).save("bg_blur.jpg")
     return "bg.jpg", "bg_blur.jpg"
+def viral_pack(story, is_short, part_label, full_story_for_title):
+    s = full_story_for_title.lower()
+    rand = random.randint(100,999)
+    if "best friend" in s and ("boyfriend" in s or "girlfriend" in s):
+        titles_p1 = ["I Followed My Boyfriend And My Heart Shattered", "My Boyfriend Said Gym But Parked At My Best Friend House"]
+        titles_p2 = ["She Opened Door Wearing MY Lost Dress", "My Best Friend Was Wearing My Clothes For Him"]
+        titles_full = ["My Boyfriend Cheated With My Best Friend And I Caught Them Red Handed", "My Best Friend Stole My Boyfriend - Full Story"]
+    elif "hotel" in s:
+        titles_p1 = ["My Wife Said Working Late But Hotel Camera Showed Different", "I Tracked Her To Room 204 And My Heart Stopped"]
+        titles_p2 = ["I Knocked On That Hotel Room And A Man Opened", "Room 204 Had My Wife And Another Man Inside"]
+        titles_full = ["My Wife Said Working Late But Was In Hotel With Another Man - Full Story", "I Caught My Wife Cheating In Hotel Room 204"]
+    elif "second phone" in s or "phone" in s:
+        titles_p1 = ["I Found Her Second Phone Hidden In Closet", "Her Hidden Phone Had 200 Messages From David"]
+        titles_p2 = ["I Opened The Second Phone And Saw Hotel Pics", "200 Messages And She Still Said Its Nothing"]
+        titles_full = ["My Girlfriend Hid Second Phone With 200 Cheating Messages - Full Story", "I Found My Girlfriends Secret Phone"]
+    elif "mother in law" in s:
+        titles_p1 = ["My Mother In Law Moved In Without Asking", "She Started Controlling What I Cook And Wear"]
+        titles_p2 = ["She Told My Husband I Am Cheating With Fake Messages", "My Mother In Law Created Fake Instagram To Ruin Me"]
+        titles_full = ["My Mother In Law Tried To Destroy My Marriage With Lies - Full Story", "My Toxic Mother In Law Created Fake Messages"]
+    elif "boss" in s:
+        titles_p1 = ["My Boss Promised Promotion If I Work Weekends", "I Worked Weekends For 3 Months For Promotion"]
+        titles_p2 = ["He Gave My Promotion To His Nephew Who Just Joined", "My Boss Betrayed Me After 3 Months Of Free Work"]
+        titles_full = ["My Boss Used Me For 3 Months Then Gave My Promotion Away - Full Story", "I Worked Weekends For Nothing - Boss Gave Promotion To Nephew"]
+    else:
+        first_10 = " ".join(full_story_for_title.split()[:10])
+        titles_p1 = [f"{first_10} - I Could Not Believe It", f"I Caught Them And My Heart Broke"]
+        titles_p2 = [f"{first_10} - The Truth Came Out", f"What Happened Next Broke Me Completely"]
+        titles_full = [f"{full_story_for_title[:70]} - Full Story", f"My Partners Lie Destroyed Everything - Full Story"]
+    if part_label == "Part 1":
+        title = random.choice(titles_p1)
+        desc = f"{story}\n\nPART 2 drops at 5PM WAT! Full shocking ending at 8PM WAT tonight! Subscribe so you don't miss it!\n\n#shorts #redditstories #cheating #storytime"
+    elif part_label == "Part 2":
+        title = random.choice(titles_p2)
+        desc = f"{story}\n\nFULL STORY drops at 8PM WAT tonight! What would YOU do?\n\n#shorts #redditstories #cheating #storytime"
+    else:
+        title = random.choice(titles_full)
+        desc = f"{story}\n\nThis is the FULL story from todays shorts. What would YOU do? Comment below!\n\nSubscribe for daily shocking true stories!\n\n#redditstories #cheating #storytime #drama #aitah #relationships"
+    title = f"{title} | True Story {rand}"
+    if is_short: title += " #shorts"
+    tags = ["shorts","reddit stories","cheating","storytime","betrayal","drama","relationship","true story", f"story{rand}"]
+    return title[:100], desc, tags
 
-def viral_pack(story, is_short):
-    if is_short:
-        titles = ["I Followed Him And My Heart Shattered Instantly","My Best Friend Was Wearing MY Clothes When I Caught Them","She Hid A Second Phone... What I Found BROKE Me","I Came Home Early And Saw Everything","My Wife Said Work... But She Was In A Hotel"]
-        desc = f"{story[:200]}...\n\nFull shocking ending drops at 8PM WAT tonight! Subscribe so you don't miss it!\n\n#shorts #redditstories #cheating #storytime"
     else:
         titles = ["My Partner Cheated For Months Until I Did THIS - Full Story","My Best Friend Stole My Girlfriend And I Got Ultimate Revenge - Full Story","My Mother In Law Tried To Destroy My Marriage - Full Story"]
         desc = f"{story}\n\nThis is the FULL story from today's shorts. What would YOU do? Comment below!\n\nSubscribe for daily shocking true stories!\n\n#redditstories #cheating #storytime #drama #aitah #relationships"
@@ -218,7 +260,7 @@ def viral_pack(story, is_short):
     tags = ["shorts","reddit stories","cheating","storytime","betrayal","drama","relationship","true story", f"story{rand}"]
     return title, desc, tags
 
-title, desc, tags = viral_pack(story_raw, IS_SHORT)
+title, desc, tags = viral_pack(story_raw, IS_SHORT, part_label, story_raw_full)
 
 def download_music():
     s = story_raw.lower()
