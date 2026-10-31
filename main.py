@@ -1,3 +1,4 @@
+TEST_MODE = True  # Set False when done testing
 import os, random, textwrap, asyncio, requests, urllib.parse, json
 from PIL import Image, ImageFilter
 if not hasattr(Image, 'ANTIALIAS'):
@@ -479,4 +480,9 @@ if not IS_SHORT:
         youtube.thumbnails().set(videoId=vid_id, media_body=MediaFileUpload(thumb_file, mimetype="image/jpeg")).execute()
         print(f"Viral thumbnail with image uploaded!")
     except Exception as e:
-        print(f"Thumbnail failed: {e}")    
+        print(f"Thumbnail failed: {e}") 
+if TEST_MODE:
+    print("TEST MODE - No upload, video created!")
+else:
+    # Your YouTube upload code here
+    creds = Credentials(...)
