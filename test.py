@@ -1,10 +1,10 @@
 import os, random, textwrap, asyncio, requests, urllib.parse
-from PIL import Image
+from PIL import Image, ImageFilter
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.LANCZOS
 from moviepy.editor import *
 import moviepy.video.fx.all as vfx
-from PIL import ImageDraw, ImageFont, ImageFilter
+from PIL import ImageDraw, ImageFont
 import edge_tts
 
 W, H = (1080,1920)
@@ -12,35 +12,33 @@ story_raw = "My boyfriend told me he goes to gym every night at 9pm. Last night 
 
 def get_ai_prompts_from_story(story):
     s = story.lower()
-    # BEST PERFECTION PROMPTS - face closeup, emotional, viral thumbnail style
     if "best friend" in s and "boyfriend" in s:
         return [
-            "beautiful young woman with shocked betrayed face closeup, tears in eyes, dramatic lighting, inside car at night watching cheating, ultra realistic, 8k, highly detailed face, emotional, viral thumbnail",
-            "stunning girl with mouth open shocked catching boyfriend cheating at door, best friend behind, dramatic cinematic lighting, closeup face",
-            "gorgeous sad woman crying lonely dark bedroom, heartbroken betrayal, tears, cinematic closeup face, ultra realistic"
+            "beautiful young woman shocked betrayed face closeup tears inside car at night cinematic ultra realistic 8k",
+            "stunning girl shocked catching boyfriend cheating at door best friend behind dramatic lighting",
+            "gorgeous sad woman crying lonely dark bedroom heartbroken betrayal tears closeup"
         ]
-    return [
-        "beautiful woman shocked betrayed face closeup tears dramatic lighting ultra realistic 8k viral",
-        "emotional crying woman face closeup heartbroken cinematic",
-        "shocked woman face dramatic betrayal discovery closeup"
-    ]
+    return ["beautiful woman shocked betrayed face closeup tears dramatic 8k"]*3
 
 def download_ai_backgrounds(story, W, H):
     prompts = get_ai_prompts_from_story(story)
     images = []
     for idx, prompt in enumerate(prompts):
-        # PERFECTION KEYWORDS for catchy subs
-        full_prompt = f"{prompt}, portrait orientation, beautiful face centered, looking at camera, sharp focus on eyes, shallow depth of field, cinematic bokeh, ultra realistic skin, 8k"
+        full_prompt = f"{prompt}, portrait, beautiful face centered, sharp focus on eyes, looking at camera, shallow depth of field, ultra realistic skin, 8k"
         safe = urllib.parse.quote(full_prompt)
         url = f"https://image.pollinations.ai/prompt/{safe}?width=768&height=1024&model=flux&nologo=true&enhance=true&seed={random.randint(1,999999)}"
         try:
-            print(f"Generating CATCHY image {idx+1}/3...")
+            print(f"Generating image {idx+1}/3...")
             r = requests.get(url, timeout=120)
             if r.status_code == 200 and len(r.content) > 8000:
                 fname = f"bg_{idx}.jpg"
                 open(fname,"wb").write(r.content)
-                images.append(fname)
-                print(f"✅ Catchy image {idx+1} ready")
+                # CREATE BLURRED VERSION FOR BACKGROUND - this fixes black bars + failure
+                img = Image.open(fname)
+                blurred = img.filter(ImageFilter.GaussianBlur(radius=15))
+                blurred.save(f"bg_{idx}_blur.jpg")
+                images.append((fname, f"bg_{idx}_blur.jpg"))
+                print(f"✅ Image {idx+1} ready")
         except Exception as e:
             print(f"Error {e}")
     
@@ -49,7 +47,8 @@ def download_ai_backgrounds(story, W, H):
     if not images:
         r = requests.get(f"https://picsum.photos/768/1024?random={random.randint(1,5000)}", timeout=20)
         open("bg_0.jpg","wb").write(r.content)
-        images = ["bg_0.jpg"]*3
+        Image.open("bg_0.jpg").filter(ImageFilter.GaussianBlur(15)).save("bg_0_blur.jpg")
+        images = [("bg_0.jpg","bg_0_blur.jpg")]*3
     return images
 
 async def make_voice_with_timing(text, file="voice.mp3"):
@@ -85,25 +84,23 @@ def make_caption_clip_pop(text, W, H, duration, start):
     clip = clip.resize(lambda t: 0.5 + 1.0*min(t*5,1) if t < 0.2 else 1)
     return clip
 
-def create_perfect_bg_clip(image_path, duration, start_time):
-    """PERFECT CATCHY STYLE: Blurred background fill + sharp normal image center"""
-    # 1. Blurred background that fills full screen (no black bars)
-    bg_blur = ImageClip(image_path).set_duration(duration).set_start(start_time)
-    # Resize to COVER full screen
+def create_perfect_bg_clip(image_pair, duration, start_time):
+    sharp_path, blur_path = image_pair
+    # 1. Blurred background fills full screen - NO BLACK BARS
+    bg_blur = ImageClip(blur_path).set_duration(duration).set_start(start_time)
     bg_blur = bg_blur.resize(height=H) if bg_blur.w/bg_blur.h < W/H else bg_blur.resize(width=W)
     if bg_blur.w < W: bg_blur = bg_blur.resize(width=W)
     if bg_blur.h < H: bg_blur = bg_blur.resize(height=H)
     bg_blur = bg_blur.crop(x_center=bg_blur.w/2, y_center=bg_blur.h/2, width=W, height=H)
-    bg_blur = bg_blur.fx(vfx.colorx, 0.4).fx(vfx.blur, 8)  # dark + blurred
+    bg_blur = bg_blur.fx(vfx.colorx, 0.5)
 
-    # 2. Sharp NORMAL image in center (not stretched) - 85% of screen
-    fg = ImageClip(image_path).set_duration(duration).set_start(start_time)
-    # Keep normal aspect, fit inside 950x1500
+    # 2. Sharp NORMAL image center - catchy
+    fg = ImageClip(sharp_path).set_duration(duration).set_start(start_time)
     fg = fg.resize(height=1450) if fg.h > fg.w else fg.resize(width=950)
     if fg.h > 1450: fg = fg.resize(height=1450)
     if fg.w > 950: fg = fg.resize(width=950)
     fg = fg.set_position(("center", "center"))
-    fg = fg.resize(lambda t: 1 + 0.02*t)  # subtle zoom
+    fg = fg.resize(lambda t: 1 + 0.02*t)
     
     return CompositeVideoClip([bg_blur, fg], size=(W,H)).set_duration(duration).set_start(start_time)
 
@@ -115,11 +112,7 @@ def make_video():
     bg_files = download_ai_backgrounds(story_raw, W, H)
     change_every = duration / len(bg_files)
     
-    bg_clips = []
-    for i, path in enumerate(bg_files):
-        clip = create_perfect_bg_clip(path, change_every, i*change_every)
-        bg_clips.append(clip)
-    
+    bg_clips = [create_perfect_bg_clip(pair, change_every, i*change_every) for i, pair in enumerate(bg_files)]
     bg_final = CompositeVideoClip(bg_clips, size=(W,H)).set_duration(duration)
 
     caps = []
@@ -138,4 +131,6 @@ def make_video():
     return "final.mp4"
 
 if __name__ == "__main__":
+    print("TEST V5.1 STABLE START...")
     make_video()
+    print("✅ DONE")
